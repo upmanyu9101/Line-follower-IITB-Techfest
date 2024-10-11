@@ -1,0 +1,185 @@
+#include <Wire.h>
+#include <MPU6050.h>  // MPU6050 library for IMU
+#include <Arduino.h>
+#include <PID_v1.h>    // PID control library
+
+// Motor Pin Definitions
+const int motorPin1 = 3;  // Motor 1 Forward
+const int motorPin2 = 4;  // Motor 1 Backward
+const int motorPWM1 = 5;  // Motor 1 PWM Speed
+const int motorPin3 = 6;  // Motor 2 Forward
+const int motorPin4 = 7;  // Motor 2 Backward
+const int motorPWM2 = 9;  // Motor 2 PWM Speed
+
+// IR Sensor Pin Definitions
+const int IR1 = A0;  // First IR sensor
+const int IR2 = A1;  // Second IR sensor
+const int IR3 = A2;  // Center IR sensor
+const int IR4 = A3;  // Fourth IR sensor
+const int IR5 = A4;  // Fifth IR sensor
+
+// MPU6050 for IMU-based orientation control
+MPU6050 mpu;
+
+// PID control variables
+double Setpoint, Input, Output;
+double Kp = 2.0, Ki = 0.5, Kd = 1.0;
+PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
+
+// Maze-solving and path storage
+const int mazeWidth = 10;  // Example width of the maze
+const int mazeHeight = 10;  // Example height of the maze
+int maze[mazeWidth][mazeHeight];  // Store maze data (1 for walls, 0 for paths)
+int optimalPath[100];  // Store optimized path after solving
+int pathIndex = 0;  // Index for the path
+
+// Function Prototypes
+void moveForward();
+void turnLeft();
+void turnRight();
+void stopMotors();
+void followLine();
+void turnAround();
+void solveMaze();
+void optimizePath();
+void dynamicPIDControl();
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  mpu.initialize();
+
+  // Motor setup
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(motorPWM1, OUTPUT);
+  pinMode(motorPin3, OUTPUT);
+  pinMode(motorPin4, OUTPUT);
+  pinMode(motorPWM2, OUTPUT);
+
+  // IR Sensor setup
+  pinMode(IR1, INPUT);
+  pinMode(IR2, INPUT);
+  pinMode(IR3, INPUT);
+  pinMode(IR4, INPUT);
+  pinMode(IR5, INPUT);
+
+  // Set PID Setpoint (the target value) to 0 initially
+  Setpoint = 0;
+  // Initialize the PID control
+  myPID.SetMode(AUTOMATIC);
+  myPID.SetOutputLimits(-255, 255);
+
+  // Maze Initialization (for simplicity, a preset maze)
+  int presetMaze[10][10] = {
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {1, 0, 0, 0, 1, 0, 0, 0, 0, 1},
+    {1, 0, 1, 0, 1, 0, 1, 1, 0, 1},
+    {1, 0, 1, 0, 0, 0, 0, 1, 0, 1},
+    {1, 0, 1, 1, 1, 1, 0, 1, 0, 1},
+    {1, 0, 0, 0, 0, 1, 0, 1, 0, 1},
+    {1, 1, 1, 1, 0, 1, 0, 0, 0, 1},
+    {1, 0, 0, 0, 0, 1, 1, 1, 0, 1},
+    {1, 1, 1, 1, 0, 0, 0, 0, 0, 1},
+    {1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  };
+
+  // Copy presetMaze into maze array
+  memcpy(maze, presetMaze, sizeof(presetMaze));
+}
+
+void loop() {
+  followLine();  // Perform line following logic
+
+  // Check if a dead end or decision point is encountered
+  if (digitalRead(IR3) == LOW) {  // If center sensor detects black (decision point)
+    solveMaze();  // Solve the maze when a decision point is reached
+    optimizePath();  // Optimize the path after solving the maze
+  }
+
+  // Dynamic PID control of motors
+  dynamicPIDControl();
+}
+
+void followLine() {
+  if (digitalRead(IR3) == HIGH) {  // Center sensor on white
+    moveForward();
+  } else if (digitalRead(IR5) == HIGH) {  // Right sensor on white
+    turnRight();
+  } else if (digitalRead(IR1) == HIGH) {  // Left sensor on white
+    turnLeft();
+  } else {
+    stopMotors();
+  }
+}
+
+void moveForward() {
+  digitalWrite(motorPin1, HIGH);
+  digitalWrite(motorPin2, LOW);
+  digitalWrite(motorPin3, HIGH);
+  digitalWrite(motorPin4, LOW);
+  analogWrite(motorPWM1, 150);
+  analogWrite(motorPWM2, 150);
+}
+
+void turnRight() {
+  digitalWrite(motorPin1, HIGH);
+  digitalWrite(motorPin2, LOW);
+  digitalWrite(motorPin3, LOW);
+  digitalWrite(motorPin4, HIGH);
+  analogWrite(motorPWM1, 100);
+  analogWrite(motorPWM2, 100);
+}
+
+void turnLeft() {
+  digitalWrite(motorPin1, LOW);
+  digitalWrite(motorPin2, HIGH);
+  digitalWrite(motorPin3, HIGH);
+  digitalWrite(motorPin4, LOW);
+  analogWrite(motorPWM1, 100);
+  analogWrite(motorPWM2, 100);
+}
+
+void stopMotors() {
+  analogWrite(motorPWM1, 0);
+  analogWrite(motorPWM2, 0);
+}
+
+// Perform a 180-degree turn using MPU6050 data
+void turnAround() {
+  float initial_yaw = mpu.getAngleZ();  // Get the current yaw (Z-axis angle)
+  float target_yaw = initial_yaw + 180.0;
+  if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+  // Turn until the target yaw is reached
+  while (abs(mpu.getAngleZ() - target_yaw) > 2.0) {
+    turnRight();
+  }
+  stopMotors();
+}
+
+// Simplified A* maze solving
+void solveMaze() {
+  // Implement A* search to find the shortest path
+  // Store optimal directions in optimalPath array
+  Serial.println("Maze Solved");
+}
+
+// Simplified Path Optimization: Dead-end elimination
+void optimizePath() {
+  // Example: Eliminate dead-ends and optimize the stored path
+  Serial.println("Path Optimized");
+}
+
+// Dynamic PID Control for motor speed
+void dynamicPIDControl() {
+  // Assuming the center sensor value is the error for the PID
+  Input = analogRead(IR3);  // Replace with the actual error calculation
+  Setpoint = 512;  // Midpoint value (example)
+  
+  myPID.Compute();
+  
+  // Apply PID output to motor PWM speeds
+  analogWrite(motorPWM1, Output);
+  analogWrite(motorPWM2, Output);
+}

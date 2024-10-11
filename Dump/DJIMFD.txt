@@ -1,0 +1,302 @@
+#include <Wire.h>
+#include <MPU6050.h>
+#include <Encoder.h>
+#include <PID_v1.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// Motor and sensor pins
+const int mrf = 5;  // Motor Right Forward
+const int mrb = 4;  // Motor Right Backward
+const int mlf = 2;  // Motor Left Forward
+const int mlb = 3;  // Motor Left Backward
+int echo = 6;
+int trig = 7;
+int encA = 8;  // Encoder pin A
+int encB = 9;  // Encoder pin B
+
+// OLED display setup (128x64 resolution)
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Encoder and IMU objects
+Encoder enc(encA, encB);  // For precise movement
+MPU6050 mpu;
+
+// PID Constants for line following
+double Kp = 6, Ki = 2, Kd = 1;
+double input, output, setpoint = 0;
+PID linePID(&input, &output, &setpoint, Kp, Ki, Kd, DIRECT);
+
+// Sensor and movement variables
+int s[8];  // For TCRT5000 IR sensors
+int initial_motor_speed = 70;  // Base motor speed
+
+// Target position and orientation
+int target_angle = 0;
+long encoderCount = 0;
+int current_orientation = 0;
+
+// A* Variables
+struct Node {
+    int x, y;
+    double f, g, h;
+    Node* parent;
+};
+Node start, goal, current;
+Node* came_from[50][50];  // Array to store the optimal path
+double g_score[50][50], f_score[50][50];  // Cost matrices
+
+// Maze structure
+const int grid_size = 10;
+int maze[grid_size][grid_size] = {0};  // Maze grid to store obstacles and free spaces
+
+// Function prototypes
+void setup();
+void loop();
+void calculate_pid();
+void motor_control();
+void rotateWithIMU(int angle);
+void moveForwardWithEncoder(int distance);
+void scanMaze();
+void followShortestPath();
+void a_star_search(Node start, Node goal);
+void dynamic_pid_tuning();
+void updateOLED();
+
+// Setup the components (Motors, MPU, Encoders, PID, OLED)
+void setup() {
+    Serial.begin(9600);
+    pinMode(mrf, OUTPUT);
+    pinMode(mrb, OUTPUT);
+    pinMode(mlf, OUTPUT);
+    pinMode(mlb, OUTPUT);
+
+    pinMode(echo, INPUT);
+    pinMode(trig, OUTPUT);
+    
+    Wire.begin();
+    mpu.initialize();
+
+    // Setup PID for line following
+    linePID.SetMode(AUTOMATIC);
+    linePID.SetOutputLimits(-255, 255);
+
+    // Initialize start and goal positions for A*
+    start = {0, 0, 0, 0, 0, nullptr};
+    goal = {9, 9, 0, 0, 0, nullptr};
+
+    // Initialize maze (0 = free, 1 = obstacle)
+    memset(maze, 0, sizeof(maze));
+
+    // Setup OLED display
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println(F("SSD1306 allocation failed"));
+        for (;;);
+    }
+    display.clearDisplay();
+    display.display();
+    delay(1000);
+
+    // Display initial status
+    updateOLED();
+}
+
+// Main loop to follow path and solve the maze
+void loop() {
+    scanMaze();  // Maze scanning logic using line following
+
+    // Use A* to find the shortest path
+    a_star_search(start, goal);
+
+    // Follow the optimized path found by A*
+    followShortestPath();
+
+    // Dynamically adjust PID settings based on environment
+    dynamic_pid_tuning();
+
+    // Update OLED with real-time data
+    updateOLED();
+}
+
+// Line following logic using PID and IR sensors
+void calculate_pid() {
+    readSensorData(s);  // Update sensor values
+    int error = 0;
+
+    if (s[3] == 1 && s[4] == 1) {
+        error = 0;  // Centered
+    } else if (s[3] == 0 && s[4] == 1) {
+        error = -1;  // Slight right
+    } else if (s[3] == 1 && s[4] == 0) {
+        error = 1;  // Slight left
+    }
+
+    input = error;  // Update PID input
+    linePID.Compute();  // Compute PID output
+
+    motor_control();  // Update motor control with PID output
+}
+
+// Control motors based on PID output
+void motor_control() {
+    int left_speed = initial_motor_speed - output;
+    int right_speed = initial_motor_speed + output;
+
+    analogWrite(mlf, constrain(left_speed, 0, 255));
+    analogWrite(mrf, constrain(right_speed, 0, 255));
+}
+
+// Use MPU6050 to rotate the robot by a certain angle
+void rotateWithIMU(int angle) {
+    int current_angle = 0;
+    while (abs(angle - current_angle) > 1) {
+        mpu.getRotation(&current_angle, NULL, NULL);
+        if (angle > current_angle) {
+            analogWrite(mrf, 100);  // Turn right
+            analogWrite(mlb, 100);
+        } else {
+            analogWrite(mlf, 100);  // Turn left
+            analogWrite(mrb, 100);
+        }
+        delay(10);
+    }
+    analogWrite(mrf, 0);  // Stop motors after rotation
+    analogWrite(mlf, 0);
+}
+
+// Use encoders to move forward by a certain distance
+void moveForwardWithEncoder(int distance) {
+    encoderCount = 0;
+    enc.write(0);  // Reset encoder
+    while (abs(enc.read()) < distance) {
+        analogWrite(mlf, 150);  // Move forward
+        analogWrite(mrf, 150);
+    }
+    analogWrite(mlf, 0);  // Stop after reaching target distance
+    analogWrite(mrf, 0);
+}
+
+// A* Algorithm for shortest path finding
+void a_star_search(Node start, Node goal) {
+    std::priority_queue<Node, std::vector<Node>, std::function<bool(Node, Node)>> open_set([](Node a, Node b) {
+        return a.f > b.f;
+    });
+    open_set.push(start);
+
+    while (!open_set.empty()) {
+        Node current = open_set.top();
+        open_set.pop();
+
+        if (current.x == goal.x && current.y == goal.y) {
+            break;  // Goal reached
+        }
+
+        // Add neighbors to open_set (up, down, left, right)
+        std::vector<Node> neighbors = {
+            {current.x + 1, current.y, 0, 0, 0, &current},
+            {current.x - 1, current.y, 0, 0, 0, &current},
+            {current.x, current.y + 1, 0, 0, 0, &current},
+            {current.x, current.y - 1, 0, 0, 0, &current}
+        };
+
+        for (Node neighbor : neighbors) {
+            if (neighbor.x >= 0 && neighbor.y >= 0 && neighbor.x < grid_size && neighbor.y < grid_size && maze[neighbor.x][neighbor.y] == 0) {
+                double tentative_g = current.g + 1;
+                if (tentative_g < g_score[neighbor.x][neighbor.y]) {
+                    came_from[neighbor.x][neighbor.y] = &current;
+                    g_score[neighbor.x][neighbor.y] = tentative_g;
+                    neighbor.g = tentative_g;
+                    neighbor.h = abs(neighbor.x - goal.x) + abs(neighbor.y - goal.y);
+                    neighbor.f = neighbor.g + neighbor.h;
+                    open_set.push(neighbor);
+                }
+            }
+        }
+    }
+}
+
+// Follow the shortest path after A* finishes
+void followShortestPath() {
+    Node* current = &goal;
+    while (current != nullptr) {
+        Serial.print("Node: ");
+        Serial.print(current->x);
+        Serial.print(", ");
+        Serial.println(current->y);
+        current = came_from[current->x][current->y];  // Backtrack from goal to start
+    }
+}
+
+// Dynamic PID tuning based on sensor feedback
+void dynamic_pid_tuning() {
+    // Adjust PID based on sensor data complexity or environment (e.g., sharp turns, straights)
+    int complexity = 0;
+
+    // Example: Adjust complexity based on IR sensor values
+    for (int i = 0; i < 8; i++) {
+        if (s[i] == 0) complexity++;  // More zeros = more complex path
+    }
+
+    // Adjust PID gains dynamically
+    if (complexity > 4) {
+        Kp = 8;
+        Ki = 3;
+        Kd = 2;
+    } else {
+        Kp = 6;
+        Ki = 2;
+        Kd = 1;
+    }
+
+    // Update the PID controller with new gains
+    linePID.SetTunings(Kp, Ki, Kd);
+}
+
+// Update OLED display with current robot status
+void updateOLED() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+
+    // Display orientation, position, and goal
+    display.print("Orientation: ");
+    display.println(current_orientation);
+    display.print("Position: ");
+    display.print(current.x);
+    display.print(", ");
+    display.println(current.y);
+    display.print("Goal: ");
+    display.print(goal.x);
+    display.print(", ");
+    display.println(goal.y);
+    
+    display.display();
+}
+
+// Scan the maze and update the maze grid based on sensor feedback
+void scanMaze() {
+    // Real-time obstacle detection (based on proximity sensor data)
+    long distance = returnDistance();
+
+    if (distance < 10) {
+        maze[current.x][current.y] = 1;  // Mark cell as obstacle
+    } else {
+        maze[current.x][current.y] = 0;  // Mark cell as free
+    }
+}
+
+// Function to return distance using an ultrasonic sensor
+long returnDistance() {
+    digitalWrite(trig, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trig, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trig, LOW);
+    long duration = pulseIn(echo, HIGH);
+    long distance = duration * 0.034 / 2;  // Convert to cm
+    return distance;
+}

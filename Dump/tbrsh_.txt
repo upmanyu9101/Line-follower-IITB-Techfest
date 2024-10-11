@@ -1,0 +1,63 @@
+
+1. TB6612FNG Motor Driver (First Image)
+This is a dual H-Bridge motor driver, often used to control motors in robotics projects. Key points from the schematic:
+
+Pin Connections:
+
+VM (Pin 1): Motor power supply (Vmax = 15V). Ensure this is connected to your battery or motor power source.
+VCC (Pin 24): Logic voltage (2.7-5.5V). Connect this to the 5V supply from the Teensy 4.1 or another appropriate logic voltage source.
+A01/A02 (Pins 3, 5), B01/B02 (Pins 10, 12): These go to the motors.
+PWM (Pins 22, 19): Connect these to PWM-capable pins on the Teensy to control the motor speed.
+AIN1, AIN2, BIN1, BIN2 (Pins 21, 23, 17, 19): These pins control the direction of the motor. Connect these to GPIO pins of the Teensy.
+STBY (Pin 7): Must be connected to VCC (high) to enable the motor driver.
+Power Capacitors: Make sure you place capacitors (C1, C2) across VM and VCC for stability (typically 10μF as shown).
+
+Troubleshooting:
+
+Check that STBY is high; otherwise, the motors will not run.
+Ensure proper grounding between the Teensy and motor driver.
+Verify the motor supply voltage (VM) and logic voltage (VCC) are within limits (VM = 15V max, VCC = 2.7-5.5V).
+2. RLS08 IR Sensor Array (Second Image)
+This IR sensor array is for line following:
+
+Power Supply (5V): Connect to the 5V and GND pins of the Teensy.
+
+Analog and Digital Outputs (A1-A8, D1-D8):
+
+Analog outputs (A1-A8) give proportional values to how much IR reflection is received.
+Digital outputs (D1-D8) give binary values for threshold detection (can be adjusted using the onboard potentiometers).
+These should be connected to appropriate analog and digital pins on the Teensy for reading sensor values.
+LED Indicators: Useful for quick checks on sensor functionality.
+
+Troubleshooting:
+
+Check the sensor power supply.
+If analog output isn’t functioning correctly, try adjusting the sensitivity using the potentiometers.
+Check each sensor’s corresponding LED for detection.
+3. LM358 Operational Amplifier (Third Image)
+This is a dual operational amplifier IC that can be used for signal conditioning or amplification.
+
+Pin Connections:
+
+Pin 4 (GND) and Pin 8 (V+): Connect to your power supply (e.g., 5V).
+Input/Output Pins: The amplifier can be used to amplify sensor outputs if needed. Inputs to inverting/non-inverting pins, outputs at Pin 1 and Pin 7.
+Troubleshooting:
+
+Check that power is supplied correctly between V+ and GND.
+Ensure proper feedback loops are in place for the amplification, or adjust based on the circuit design.
+4. Teensy 4.1 Microcontroller (Fourth Image)
+This is the main controller for the system:
+
+Pin Mapping: Ensure all motor driver pins (PWM, DIR) and sensor outputs (analog/digital) are properly connected to corresponding pins on the Teensy. The pin map provided can help identify which pins are analog-capable (for reading sensor values) or PWM-capable (for motor control).
+
+Power: Ensure the Teensy is powered through the 5V USB line, or you can use an external power source connected to the 5V or VIN pin.
+
+Troubleshooting:
+
+Double-check the pin mapping.
+Ensure the code running on Teensy matches the hardware connections (i.e., the right GPIOs are used).
+Check Teensy's power and ground connections.
+General Troubleshooting Tips:
+Power: Ensure all components share a common ground and that voltage levels are within the operating range of each component.
+Connections: Use a multimeter to check for continuity and proper voltage at critical points.
+Signal Checking: If you're not receiving expected signals, use an oscilloscope or logic analyzer to check the data lines.

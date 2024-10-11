@@ -1,0 +1,25 @@
+const int sensorPins[] = {14,15,16,17,18,19,20,21}; // IR sensor pins
+int sensorValues[8];
+
+void setup() {
+  Serial.begin(9600);
+  for (int i = 0; i < 8; i++) {
+    pinMode(sensorPins[i], INPUT);
+  }
+}
+
+void loop() {
+  readSensors();
+  delay(500); // Delay for readability
+}
+
+void readSensors() {
+  for (int i = 0; i < 8; i++) {
+    sensorValues[i] = analogRead(sensorPins[i]);
+    Serial.print("Sensor ");
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.println(sensorValues[i]);
+  }
+  Serial.println("---------------------");
+}

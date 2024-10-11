@@ -1,0 +1,78 @@
+Just in case:
+
+1. Issues with Dynamic PID Control:
+Symptoms: The robot might not follow the line properly, overcompensate for errors, or exhibit erratic movements. Fixes:
+
+Tune PID constants: If the robot is oscillating, reduce Kp or increase Kd. If it’s slow to correct errors, increase Kp or reduce Kd. You can do manual PID tuning using a trial-and-error method:
+Increase Kp until the robot starts oscillating.
+Increase Kd until the oscillation stops.
+Fine-tune Ki to remove steady-state errors.
+Test in simpler environments: Test on a simple track with straight paths and known conditions before moving to more complex mazes.
+Log PID values: Add Serial.print statements to log the P, I, and D values during the run to see if any term is becoming too large or too small.
+
+2. Issues with Maze Scanning:
+Symptoms: The robot might get stuck, fail to detect a junction, or incorrectly identify junctions. Fixes:
+
+Check sensor data: Use Serial.print() to print the IR sensor values (s[0] to s[7]) and verify if the sensor values are correct when the robot reaches a junction.
+Modify compareSensorData function: Ensure that the logic to identify junctions is correct. If the robot incorrectly identifies junctions, you may need to tweak the sensor thresholds in compareSensorData().
+Slow down at junctions: Reduce speed near junctions to ensure the sensors have enough time to detect changes and the turning logic has enough time to react.
+
+3. Issues with OLED Display:
+Symptoms: The OLED might not display messages correctly or show nothing. Fixes:
+
+Initialization: Ensure that the OLED is correctly initialized in setupOLED(). Check for wiring issues if it’s not displaying anything.
+Check I2C address: If the display doesn’t work, the I2C address might be incorrect. You can use an I2C scanner to find the correct address.
+Update display in real-time: If the display is not updating correctly, ensure that display.display() is called after every change to the display.
+
+4. Issues with Motor Control:
+Symptoms: Motors might not turn as expected, or the robot might move inconsistently. Fixes:
+
+Check power: Ensure the motors have sufficient power. If using batteries, check that the voltage is stable and sufficient for the motors.
+Check PWM signals: Use analogWrite() correctly to control motor speed. If the motors don’t rotate, try manually testing motor speeds with different PWM values.
+Direction and Speed Mismatch: If one motor seems faster than the other, adjust the motor speed in motor_control() to balance left and right speeds, or modify the motor wiring if necessary.
+
+5. Issues with Ultrasonic Sensor (Obstacle Detection):
+Symptoms: The robot may fail to detect obstacles or falsely detect them. Fixes:
+
+Check sensor positioning: Ensure the ultrasonic sensor is positioned correctly and not blocked by other components.
+Verify distance calculations: Use Serial.print() to log the returnDistance() output. Verify that the distance is within expected ranges.
+Check trigger timing: Make sure there is enough delay between triggering the sensor and reading the echo.
+
+6. Issues with Dynamic Maze Updates:
+Symptoms: The maze might not be updated correctly in superArray, leading to wrong pathfinding. Fixes:
+
+Log maze updates: Add logging to updateMazeGrid() to print the changes made to superArray to verify the updates are correct.
+Check coordinate tracking: Ensure that the robot's position is being correctly tracked in theBot.xCoordi and theBot.yCoordi. Print these values during the robot's movement to verify correct tracking.
+
+7. *Issues with Pathfinding (A or Junction Logic)**:
+Symptoms: The robot might follow an incorrect path or fail to reach the goal. Fixes:
+
+Test pathfinding in isolation: Before running the full code, test the A* pathfinding algorithm separately with a simple maze. Log the paths that are calculated to ensure they are correct.
+Ensure correct goal setting: Verify that the endId is being correctly set and used in pathfinding functions like followShortestPath().
+Check weight assignments: Ensure that the weights in findShortestPath() are being updated correctly. If the robot picks wrong paths, check if the junction weights are calculated as expected.
+
+8. Handling Interruptions and Overheating:
+Symptoms: The robot might stop unexpectedly, or the motors might overheat. Fixes:
+
+Use timeouts: Implement timeouts for long operations, especially in while loops, to prevent the robot from getting stuck if it encounters an unexpected situation.
+Monitor temperature: If your motors are getting too hot, you may need to reduce speed, add cooling, or implement pauses to let the motors cool down.
+
+9. Enhancing Error Detection and Recovery:
+Symptoms: The robot might not recover well from errors or wrong decisions. Fixes:
+
+Add error detection: Implement checks for sensor malfunctions (e.g., all sensors returning zero values for an extended period) and add error recovery mechanisms (e.g., stop and attempt recalibration).
+Recalibration Mechanism: After an unexpected movement or obstacle, implement a function to recalibrate the robot's position and orientation by aligning it with known paths.
+
+10. Debugging Communication with Sensors and Actuators:
+Symptoms: Inconsistent behavior due to communication issues with components (IR sensors, motors, etc.). Fixes:
+
+Check I2C/Wire communication: Ensure proper communication with I2C-based components like the OLED and other sensors. Use Wire.begin() and ensure proper I2C initialization in the setup().
+Debounce sensor inputs: Use simple debouncing techniques to filter out sensor noise that might result in erratic behavior.
+General Debugging Tips:
+Break down the code into modules: Test each function or sensor separately. For example, test the motor control logic independently from the sensor reading logic.
+Use Serial.print() extensively: Print important values and states (e.g., PID values, sensor readings, junction IDs, motor speeds) to the serial monitor for easy debugging.
+Save your working code: After each major addition or enhancement, save a copy of the working code so you can easily roll back if something breaks.
+Testing the Code:
+Test in parts: Start by testing PID tuning, motor control, and sensor reading independently before running the full maze-solving algorithm.
+Simulate scenarios: If possible, simulate edge cases (e.g., dead ends, turns, junctions) using predefined mazes and see how the robot responds.
+Isolate hardware issues: If the robot's movements are inconsistent, try testing the motors and sensors individually to rule out hardware malfunctions.

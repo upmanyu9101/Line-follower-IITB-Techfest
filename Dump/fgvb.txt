@@ -1,0 +1,346 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_MPU6050.h>
+#include <PID_v1.h>
+
+// Define display size and I2C address
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// MPU6050 object
+Adafruit_MPU6050 mpu;
+
+// Motor control pins
+#define motorA1 5  // IN1 for Motor A (D1 on NodeMCU)
+#define motorA2 4  // IN2 for Motor A (D2 on NodeMCU)
+#define motorB1 0  // IN3 for Motor B (D3 on NodeMCU)
+#define motorB2 2  // IN4 for Motor B (D4 on NodeMCU)
+
+// PID variables
+double Setpoint, Input, Output;
+double Kp = 2, Ki = 5, Kd = 1; // PID parameters
+PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
+
+// Sensors and threshold values
+int sensorPins[] = {D1, D2, D3, D4, D5, D6, D7, D8};
+int sensorValues[8];
+int lineThreshold = 500;  // Line detection threshold
+
+// A* Maze-solving variables
+struct Node {
+  int x, y;
+  int cost;
+  int heuristic;
+  Node* parent;
+};
+
+Node maze[10][10];  // 10x10 maze grid
+Node* openSet[100];
+Node* closedSet[100];
+Node* path[100];  // To store the final path
+int pathLength = 0;
+
+void setup() {
+  // Initialize serial communication
+  Serial.begin(115200);
+
+  // Initialize I2C communication
+  Wire.begin();
+
+  // Initialize display
+  if (!display.begin(SSD1306_I2C_ADDRESS, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;) {}
+  }
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+
+  // Initialize MPU6050
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
+    }
+  }
+  Serial.println("MPU6050 Found!");
+  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
+  mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+
+  // Initialize motors
+  pinMode(motorA1, OUTPUT);
+  pinMode(motorA2, OUTPUT);
+  pinMode(motorB1, OUTPUT);
+  pinMode(motorB2, OUTPUT);
+
+  // Initialize PID controller
+  Setpoint = 0;
+  myPID.SetMode(AUTOMATIC);
+  
+  // Initialize maze with default values
+  initializeMaze();
+}
+
+void loop() {
+  // Read sensors
+  readSensors();
+
+  // Display sensor values on OLED
+  displaySensorValues();
+
+  // Line following with PID control
+  Input = calculateError();
+  myPID.Compute();
+  adjustMotors(Output);
+
+  // Solve the maze using A*
+  solveMaze();
+}
+
+// Function to read sensor values
+void readSensors() {
+  for (int i = 0; i < 8; i++) {
+    sensorValues[i] = analogRead(sensorPins[i]);
+  }
+}
+
+// Function to display sensor values on OLED
+void displaySensorValues() {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  for (int i = 0; i < 8; i++) {
+    display.setCursor(0, i * 8);
+    display.print("Sensor "); display.print(i); display.print(": ");
+    display.println(sensorValues[i] > lineThreshold ? "WHITE" : "BLACK");
+  }
+  display.display();
+}
+
+// Function to calculate error for PID
+double calculateError() {
+  int error = 0;
+  for (int i = 0; i < 8; i++) {
+    if (sensorValues[i] < lineThreshold) {
+      error += (i - 3.5) * 100; // Adjust error based on sensor position
+    }
+  }
+  return error;
+}
+
+// Function to adjust motor speeds based on PID output
+void adjustMotors(double pidOutput) {
+  int baseSpeed = 150;
+  int leftMotorSpeed = baseSpeed - pidOutput;
+  int rightMotorSpeed = baseSpeed + pidOutput;
+  analogWrite(motorA1, leftMotorSpeed);
+  analogWrite(motorA2, LOW);
+  analogWrite(motorB1, rightMotorSpeed);
+  analogWrite(motorB2, LOW);
+}
+
+// Function to stop the motors
+void stopMotors() {
+  digitalWrite(motorA1, LOW);
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, LOW);
+  digitalWrite(motorB2, LOW);
+}
+
+// A* Maze Solving Functions
+void initializeMaze() {
+  for (int x = 0; x < 10; x++) {
+    for (int y = 0; y < 10; y++) {
+      maze[x][y].x = x;
+      maze[x][y].y = y;
+      maze[x][y].cost = 1;  // Default cost
+      maze[x][y].heuristic = 0;
+      maze[x][y].parent = NULL;
+    }
+  }
+}
+
+int heuristic(Node* a, Node* b) {
+  return abs(a->x - b->x) + abs(a->y - b->y);
+}
+
+void solveMaze() {
+  Node* startNode = &maze[0][0];
+  Node* endNode = &maze[9][9];
+  startNode->heuristic = heuristic(startNode, endNode);
+  pathLength = 0;
+  
+  if (aStar(startNode, endNode)) {
+    // Follow the path
+    followPath();
+  }
+}
+
+bool aStar(Node* start, Node* end) {
+  int openSetSize = 0;
+  int closedSetSize = 0;
+  openSet[openSetSize++] = start;
+  
+  while (openSetSize > 0) {
+    Node* current = getLowestCostNode(openSet, openSetSize);
+    if (current == end) {
+      reconstructPath(current);
+      return true;
+    }
+    
+    removeFromSet(openSet, openSetSize, current);
+    closedSet[closedSetSize++] = current;
+    
+    Node* neighbors[4] = {
+      &maze[current->x + 1][current->y],  // Right
+      &maze[current->x - 1][current->y],  // Left
+      &maze[current->x][current->y + 1],  // Down
+      &maze[current->x][current->y - 1]   // Up
+    };
+    
+    for (int i = 0; i < 4; i++) {
+      Node* neighbor = neighbors[i];
+      if (neighbor->x < 0 || neighbor->x >= 10 || neighbor->y < 0 || neighbor->y >= 10) {
+        continue;  // Skip out of bounds neighbors
+      }
+      if (contains(closedSet, closedSetSize, neighbor)) {
+        continue;
+      }
+      
+      int tentativeCost = current->cost + 1;
+      if (!contains(openSet, openSetSize, neighbor)) {
+        openSet[openSetSize++] = neighbor;
+      } else if (tentativeCost >= neighbor->cost) {
+        continue;
+      }
+      
+      neighbor->parent = current;
+      neighbor->cost = tentativeCost;
+      neighbor->heuristic = neighbor->cost + heuristic(neighbor, end);
+    }
+  }
+  return false;
+}
+
+Node* getLowestCostNode(Node* set[], int setSize) {
+  Node* lowest = set[0];
+  for (int i = 1; i < setSize; i++) {
+    if (set[i]->heuristic < lowest->heuristic) {
+      lowest = set[i];
+    }
+  }
+  return lowest;
+}
+
+void removeFromSet(Node* set[], int& setSize, Node* node) {
+  for (int i = 0; i < setSize; i++) {
+    if (set[i] == node) {
+      for (int j = i; j < setSize - 1; j++) {
+        set[j] = set[j + 1];
+      }
+      setSize--;
+      break;
+    }
+  }
+}
+
+bool contains(Node* set[], int setSize, Node* node) {
+  for (int i = 0; i < setSize; i++) {
+    if (set[i] == node) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void reconstructPath(Node* current) {
+  pathLength = 0;
+  while (current != NULL) {
+    path[pathLength++] = current;
+    current = current->parent;
+  }
+}
+
+void followPath() {
+  for (int i = pathLength - 1; i >= 0; i--) {
+    Node* current = path[i];
+    Node* next = (i > 0) ? path[i - 1] : NULL;
+
+    if (next != NULL) {
+      if (next->x > current->x) {
+        moveRight(); // Move to the right
+      } else if (next->x < current->x) {
+        moveLeft();  // Move to the left
+      } else if (next->y > current->y) {
+        moveDown();  // Move downward
+      } else if (next->y < current->y) {
+        moveUp();    // Move upward
+      }
+    }
+    delay(1000); // Delay between moves
+  }
+}
+
+// Function to move motors forward
+void moveForward() {
+  digitalWrite(motorA1, HIGH); // Motor A forward
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, HIGH); // Motor B forward
+  digitalWrite(motorB2, LOW);
+}
+
+// Function to move motors backward
+void moveBackward() {
+  digitalWrite(motorA1, LOW); // Motor A backward
+  digitalWrite(motorA2, HIGH);
+  digitalWrite(motorB1, LOW); // Motor B backward
+  digitalWrite(motorB2, HIGH);
+}
+
+// Function to stop motors
+void stopMotors() {
+  digitalWrite(motorA1, LOW);
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, LOW);
+  digitalWrite(motorB2, LOW);
+}
+
+// Function to move right
+void moveRight() {
+  // Turn right for a 90-degree turn
+  digitalWrite(motorA1, HIGH);
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, LOW);
+  digitalWrite(motorB2, HIGH);
+  delay(500);  // Adjust the delay for accurate 90-degree turns
+  stopMotors();
+}
+
+// Function to move left
+void moveLeft() {
+  // Turn left for a 90-degree turn
+  digitalWrite(motorA1, LOW);
+  digitalWrite(motorA2, HIGH);
+  digitalWrite(motorB1, HIGH);
+  digitalWrite(motorB2, LOW);
+  delay(500);  // Adjust the delay for accurate 90-degree turns
+  stopMotors();
+}
+
+// Function to move up (forward)
+void moveUp() {
+  moveForward();
+  delay(1000);  // Adjust time to move one grid space
+  stopMotors();
+}
+
+// Function to move down (backward)
+void moveDown() {
+  moveBackward();
+  delay(1000);  // Adjust time to move one grid space
+  stopMotors();
+}

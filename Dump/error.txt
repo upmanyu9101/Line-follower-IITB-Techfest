@@ -1,0 +1,43 @@
+src\oled.cpp: In function 'void calculate_pid()':
+src\oled.cpp:126:5: error: 'readSensorData' was not declared in this scope
+  126 |     readSensorData(s);  // Update sensor values
+      |     ^~~~~~~~~~~~~~
+src\oled.cpp: In function 'void rotateWithIMU(int)':
+src\oled.cpp:156:25: error: cannot convert 'int*' to 'int16_t*' {aka 'short int*'}
+  156 |         mpu.getRotation(&current_angle, NULL, NULL);
+      |                         ^~~~~~~~~~~~~~
+      |                         |
+      |                         int*
+In file included from src\oled.cpp:2:
+.pio\libdeps\teensy41\MPU6050\src/MPU6050.h:656:35: note:   initializing argument 1 of 'void MPU6050_Base::getRotation(int16_t*, int16_t*, int16_t*)'
+  656 |         void getRotation(int16_t* x, int16_t* y, int16_t* z);
+      |                          ~~~~~~~~~^
+src\oled.cpp: In function 'void a_star_search(Node, Node)':
+src\oled.cpp:184:10: error: 'priority_queue' is not a member of 'std'
+  184 |     std::priority_queue<Node, std::vector<Node>, std::function<bool(Node, Node)>> open_set([](Node a, Node b) {
+      |          ^~~~~~~~~~~~~~
+src\oled.cpp:7:1: note: 'std::priority_queue' is defined in header '<queue>'; did you forget to '#include <queue>'?
+Compiling .pio\build\teensy41\FrameworkArduino\sm_alloc_valid.c.o
+    6 | #include <Adafruit_SSD1306.h>
+  +++ |+#include <queue>
+    7 |
+src\oled.cpp:184:29: error: expected primary-expression before ',' token
+  184 |     std::priority_queue<Node, std::vector<Node>, std::function<bool(Node, Node)>> open_set([](Node a, Node b) {
+      |                             ^
+src\oled.cpp:184:48: error: expected primary-expression before ',' token
+  184 |     std::priority_queue<Node, std::vector<Node>, std::function<bool(Node, Node)>> open_set([](Node a, Node b) {
+      |                                                ^
+src\oled.cpp:184:80: error: expected primary-expression before '>' token
+  184 |     std::priority_queue<Node, std::vector<Node>, std::function<bool(Node, Node)>> open_set([](Node a, Node b) {
+      |                                                                                ^~
+Compiling .pio\build\teensy41\FrameworkArduino\sm_calloc.c.o
+src\oled.cpp:184:83: error: 'open_set' was not declared in this scope
+  184 |     std::priority_queue<Node, std::vector<Node>, std::function<bool(Node, Node)>> open_set([](Node a, Node b) {
+      |                                                                                   ^~~~~~~~
+Compiling .pio\build\teensy41\FrameworkArduino\sm_free.c.o
+Compiling .pio\build\teensy41\FrameworkArduino\sm_hash.c.o
+Compiling .pio\build\teensy41\FrameworkArduino\sm_malloc.c.o
+Compiling .pio\build\teensy41\FrameworkArduino\sm_malloc_stats.c.o
+src\oled.cpp: In function 'void scanMaze()':
+src\oled.cpp:283:21: error: 'returnDistance' was not declared in this scope
+  283 |     long distance = returnDistance()

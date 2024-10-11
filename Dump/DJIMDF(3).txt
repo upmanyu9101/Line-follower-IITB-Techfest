@@ -1,0 +1,221 @@
+#include <Wire.h>          // For I2C communication
+#include <MPU6050.h>       // For the MPU6050 IMU sensor
+#include <Arduino.h>       // For core Arduino functions (pinMode, Serial, etc.)
+#include <Encoder.h>       // For quadrature encoders
+#include <PID_v1.h>        // For PID control
+#include <SPI.h>           // For SPI communication (if needed)
+
+// Motor and sensor pins
+const int mrf = 5;  // Motor Right Forward
+const int mrb = 4;  // Motor Right Backward
+const int mlf = 2;  // Motor Left Forward
+const int mlb = 3;  // Motor Left Backward
+int echo = 6;
+int trig = 7;
+int encA = 8;  // Encoder pin A
+int encB = 9;  // Encoder pin B
+
+// Create an Encoder object (Encoder pin A and pin B)
+Encoder enc(encA, encB);  // For precise movement
+
+// Create an MPU6050 object (IMU sensor)
+MPU6050 mpu;
+
+// PID Constants for line following (These are PID gains)
+double Kp = 6, Ki = 2, Kd = 1;
+double input = 0, output = 0, setpoint = 0;
+
+// Create a PID object
+PID linePID(&input, &output, &setpoint, Kp, Ki, Kd, DIRECT);
+
+// Sensor and movement variables
+int s[8];  // For TCRT5000 IR sensors
+int initial_motor_speed = 70;  // Base motor speed
+
+// Target position and orientation
+int target_angle = 0;
+long encoderCount = 0;
+int current_orientation = 0;
+
+// A* Algorithm Variables
+struct Node {
+    int x, y;
+    double f, g, h;
+    Node* parent;
+};
+
+// Create the start, goal, and current nodes
+Node start, goal, current;
+Node* came_from[50][50];  // Array to store the optimal path
+double g_score[50][50], f_score[50][50];  // Cost matrices
+
+// Maze structure
+const int grid_size = 10;
+int maze[grid_size][grid_size] = {0};  // Maze grid to store obstacles and free spaces
+
+// Function prototypes (declarations)
+long returnDistance();
+void scanMaze();
+void readSensors();  // Declare readSensors here
+void calculate_pid();
+void motor_control();
+void rotateWithIMU(int angle);
+void moveForwardWithEncoder(int distance);
+void a_star_search(Node start, Node goal);
+void followShortestPath();
+void dynamic_pid_tuning();
+
+// Setup function (Initialize everything here)
+void setup() {
+    // Initialize Serial communication
+    Serial.begin(9600);
+
+    // Set motor pins as output
+    pinMode(mrf, OUTPUT);
+    pinMode(mrb, OUTPUT);
+    pinMode(mlf, OUTPUT);
+    pinMode(mlb, OUTPUT);
+
+    // Set up ultrasonic sensor pins
+    pinMode(echo, INPUT);
+    pinMode(trig, OUTPUT);
+
+    // Initialize I2C communication and the MPU6050 sensor
+    Wire.begin();
+    mpu.initialize();
+
+    // Setup PID for line following
+    linePID.SetMode(AUTOMATIC);
+    linePID.SetOutputLimits(-255, 255);
+
+    // Initialize start and goal positions for A*
+    start = {0, 0, 0, 0, 0, nullptr};  // Starting node
+    goal = {9, 9, 0, 0, 0, nullptr};   // Goal node
+
+    // Initialize maze (0 = free, 1 = obstacle)
+    memset(maze, 0, sizeof(maze));
+}
+
+// Main loop
+void loop() {
+    scanMaze();  // Maze scanning logic using line following
+    a_star_search(start, goal);  // Use A* to find the shortest path
+    followShortestPath();  // Follow the optimized path found by A*
+    dynamic_pid_tuning();  // Dynamically adjust PID settings based on environment
+}
+
+// Function definitions:
+
+// Function to return distance using an ultrasonic sensor
+long returnDistance() {
+    digitalWrite(trig, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trig, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trig, LOW);
+    long duration = pulseIn(echo, HIGH);
+    long distance = duration * 0.034 / 2;  // Convert to cm
+    return distance;
+}
+
+// Scan the maze and update the maze grid based on sensor feedback
+void scanMaze() {
+    long distance = returnDistance();
+    if (distance < 10) {
+        maze[current.x][current.y] = 1;  // Mark cell as obstacle
+    } else {
+        maze[current.x][current.y] = 0;  // Mark cell as free
+    }
+}
+
+// Read sensor data (assuming this reads from TCRT5000 sensors)
+void readSensors() {
+    for (int i = 0; i < 8; i++) {
+        s[i] = analogRead(i);  // Read analog sensor values
+        Serial.print("Sensor ");
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.println(s[i]);  // Print sensor values for debugging
+    }
+    Serial.println("---------------------");
+}
+
+// PID logic for line following
+void calculate_pid() {
+    readSensors();  // Call readSensors here to update sensor readings
+    int error = 0;
+
+    if (s[3] == 1 && s[4] == 1) {
+        error = 0;  // Centered
+    } else if (s[3] == 0 && s[4] == 1) {
+        error = -1;  // Slight right
+    } else if (s[3] == 1 && s[4] == 0) {
+        error = 1;  // Slight left
+    }
+
+    input = error;  // Update PID input
+    linePID.Compute();  // Compute PID output
+    motor_control();  // Update motor control
+}
+
+// Motor control based on PID output
+void motor_control() {
+    int left_speed = initial_motor_speed - output;
+    int right_speed = initial_motor_speed + output;
+
+    // Constrain the motor speeds between 0 and 255
+    analogWrite(mlf, constrain(left_speed, 0, 255));
+    analogWrite(mrf, constrain(right_speed, 0, 255));
+}
+
+// Use MPU6050 to rotate the robot by a certain angle
+void rotateWithIMU(int angle) {
+    int current_angle = 0;
+    while (abs(angle - current_angle) > 1) {
+        mpu.getRotation(&current_angle, NULL, NULL);
+        if (angle > current_angle) {
+            analogWrite(mrf, 100);  // Turn right
+            analogWrite(mlb, 100);
+        } else {
+            analogWrite(mlf, 100);  // Turn left
+            analogWrite(mrb, 100);
+        }
+        delay(10);
+    }
+    analogWrite(mrf, 0);  // Stop motors after rotation
+    analogWrite(mlf, 0);
+}
+
+// Use encoders to move forward by a certain distance
+void moveForwardWithEncoder(int distance) {
+    encoderCount = 0;
+    enc.write(0);  // Reset encoder
+    while (abs(enc.read()) < distance) {
+        analogWrite(mlf, 150);  // Move forward
+        analogWrite(mrf, 150);
+    }
+    analogWrite(mlf, 0);  // Stop after reaching target distance
+    analogWrite(mrf, 0);
+}
+
+// A* Algorithm for shortest path finding
+void a_star_search(Node start, Node goal) {
+    // Implement A* algorithm here (similar to original code)
+}
+
+// Follow the shortest path after A* finishes
+void followShortestPath() {
+    Node* current = &goal;
+    while (current != nullptr) {
+        Serial.print("Node: ");
+        Serial.print(current->x);
+        Serial.print(", ");
+        Serial.println(current->y);
+        current = came_from[current->x][current->y];  // Backtrack from goal to start
+    }
+}
+
+// Dynamic PID tuning based on sensor feedback
+void dynamic_pid_tuning() {
+    // Adjust PID based on sensor data complexity or environment
+}

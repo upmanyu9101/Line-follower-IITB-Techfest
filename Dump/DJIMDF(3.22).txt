@@ -1,0 +1,355 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <MPU6050.h>
+#include <string.h>
+#include <math.h>  // For fabs()
+
+// Motor Pin Definitions
+const int motorPin1 = 3;  // Motor 1 Forward
+const int motorPin2 = 4;  // Motor 1 Backward
+const int motorPWM1 = 5;  // Motor 1 PWM Speed
+
+const int motorPin3 = 6;  // Motor 2 Forward
+const int motorPin4 = 7;  // Motor 2 Backward
+const int motorPWM2 = 9;  // Motor 2 PWM Speed
+
+// IR Sensor Pin Definitions
+const int IR1 = A0;  // First IR sensor
+const int IR2 = A1;  // Second IR sensor
+const int IR3 = A2;  // Center IR sensor
+const int IR4 = A3;  // Fourth IR sensor
+const int IR5 = A4;  // Fifth IR sensor
+
+// MPU6050 for IMU-based orientation control
+MPU6050 mpu;
+
+// Enumerations for moves and intersections
+enum move { R, L, S, U, ExI, ST };
+enum intersection { DE, EOM, S_R, S_L, CR, T, RO, LO, CL };
+
+// Global variables
+char light_sensor[6];  // Store IR sensor states (null-terminated string)
+move ac_path[100];     // Dry run path as enum moves
+int ac_path_len = 0;   // Length of the actual path
+move opt_path[100];    // Optimized path as enum moves
+int opt_path_len = 0;  // Length of the optimized path
+
+// Function prototypes
+float get_yaw();
+void update_light_sensor();
+void stop_motors();
+void move_straight();
+void turn_left();
+void turn_right();
+void turn_180();
+void move_a_bit();
+intersection detect_intersection();
+move move_handling(intersection i);
+void record_move(move m);
+void optimize_path();
+bool isoptimizable();
+void optimize_moves(int index);
+
+void setup() {
+    Wire.begin();
+    mpu.initialize();
+    // Calibrate the MPU6050 if necessary
+    // mpu.CalibrateAccel(6);
+    // mpu.CalibrateGyro(6);
+
+    // Motor setup
+    pinMode(motorPin1, OUTPUT);
+    pinMode(motorPin2, OUTPUT);
+    pinMode(motorPWM1, OUTPUT);
+
+    pinMode(motorPin3, OUTPUT);
+    pinMode(motorPin4, OUTPUT);
+    pinMode(motorPWM2, OUTPUT);
+
+    // IR Sensor setup
+    pinMode(IR1, INPUT);
+    pinMode(IR2, INPUT);
+    pinMode(IR3, INPUT);
+    pinMode(IR4, INPUT);
+    pinMode(IR5, INPUT);
+
+    Serial.begin(9600);
+}
+
+void loop() {
+    move m = S;     // Initial move
+    intersection i;
+
+    // Dry run: Record path
+    while (m != ST) {
+        // Detect sensors
+        update_light_sensor();
+
+        // Follow the line
+        while (strcmp(light_sensor, "00100") != 0) {
+            if (strcmp(light_sensor, "00001") == 0 || strcmp(light_sensor, "00011") == 0) {
+                // Turn right
+                turn_right();
+            } else if (strcmp(light_sensor, "01100") == 0 || strcmp(light_sensor, "11000") == 0) {
+                // Turn left
+                turn_left();
+            } else if (strcmp(light_sensor, "00110") == 0 || strcmp(light_sensor, "01110") == 0 || strcmp(light_sensor, "00100") == 0) {
+                // Move straight
+                move_straight();
+            } else {
+                // Lost line, stop motors
+                stop_motors();
+            }
+            // Update sensor values
+            update_light_sensor();
+        }
+
+        // Intersection handling
+        while (strcmp(light_sensor, "00100") == 0) {
+            // Move straight
+            move_straight();
+            update_light_sensor();
+        }
+
+        // Determine intersection type
+        i = detect_intersection();
+
+        // Move handling based on intersection
+        m = move_handling(i);
+
+        // Record the move
+        record_move(m);
+    }
+
+    // Optimize the path after dry run
+    optimize_path();
+
+    // Follow the optimized path during the actual run
+    for (int idx = 0; idx < opt_path_len; idx++) {
+        move m = opt_path[idx];
+        switch(m) {
+            case R:
+                turn_right();
+                break;
+            case L:
+                turn_left();
+                break;
+            case S:
+                move_straight();
+                delay(500); // Adjust delay for distance
+                stop_motors();
+                break;
+            case U:
+                turn_180();
+                break;
+            case ExI:
+                move_a_bit();
+                break;
+            case ST:
+                stop_motors();
+                break;
+        }
+        delay(500);  // Adjust delay for smoother transitions
+    }
+
+    // End of the loop
+    while (1); // Stop the loop
+}
+
+// Function to get current yaw from MPU6050
+float get_yaw() {
+    static unsigned long lastTime = 0;
+    static float yaw = 0.0;
+    unsigned long currentTime = millis();
+    float deltaTime = (currentTime - lastTime) / 1000.0;
+    lastTime = currentTime;
+
+    mpu.getRotation(NULL, NULL, &gyroZ);
+    float gyroZ = mpu.getRotationZ() / 131.0; // Convert to degrees per second
+    yaw += gyroZ * deltaTime;
+    if (yaw >= 360.0) yaw -= 360.0;
+    if (yaw < 0.0) yaw += 360.0;
+    return yaw;
+}
+
+// Update the light_sensor array with current IR sensor readings
+void update_light_sensor() {
+    light_sensor[0] = digitalRead(IR1) ? '1' : '0';
+    light_sensor[1] = digitalRead(IR2) ? '1' : '0';
+    light_sensor[2] = digitalRead(IR3) ? '1' : '0';
+    light_sensor[3] = digitalRead(IR4) ? '1' : '0';
+    light_sensor[4] = digitalRead(IR5) ? '1' : '0';
+    light_sensor[5] = '\0'; // Null-terminate the string
+}
+
+// Stop the motors
+void stop_motors() {
+    analogWrite(motorPWM1, 0);
+    analogWrite(motorPWM2, 0);
+}
+
+// Move the robot straight
+void move_straight() {
+    digitalWrite(motorPin1, HIGH);
+    digitalWrite(motorPin2, LOW);
+    digitalWrite(motorPin3, HIGH);
+    digitalWrite(motorPin4, LOW);
+    analogWrite(motorPWM1, 150);
+    analogWrite(motorPWM2, 150);
+}
+
+// Turn the robot left
+void turn_left() {
+    float initial_yaw = get_yaw();
+    float target_yaw = initial_yaw - 90.0;
+    if (target_yaw < 0.0) target_yaw += 360.0;
+
+    digitalWrite(motorPin1, LOW);
+    digitalWrite(motorPin2, HIGH);
+    digitalWrite(motorPin3, HIGH);
+    digitalWrite(motorPin4, LOW);
+    analogWrite(motorPWM1, 100);
+    analogWrite(motorPWM2, 100);
+
+    while (fabs(get_yaw() - target_yaw) > 1.0) {
+        delay(10);
+    }
+
+    stop_motors();
+}
+
+// Turn the robot right
+void turn_right() {
+    float initial_yaw = get_yaw();
+    float target_yaw = initial_yaw + 90.0;
+    if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+    digitalWrite(motorPin1, HIGH);
+    digitalWrite(motorPin2, LOW);
+    digitalWrite(motorPin3, LOW);
+    digitalWrite(motorPin4, HIGH);
+    analogWrite(motorPWM1, 100);
+    analogWrite(motorPWM2, 100);
+
+    while (fabs(get_yaw() - target_yaw) > 1.0) {
+        delay(10);
+    }
+
+    stop_motors();
+}
+
+// Turn the robot 180 degrees
+void turn_180() {
+    float initial_yaw = get_yaw();
+    float target_yaw = initial_yaw + 180.0;
+    if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+    digitalWrite(motorPin1, HIGH);
+    digitalWrite(motorPin2, LOW);
+    digitalWrite(motorPin3, LOW);
+    digitalWrite(motorPin4, HIGH);
+    analogWrite(motorPWM1, 100);
+    analogWrite(motorPWM2, 100);
+
+    while (fabs(get_yaw() - target_yaw) > 1.0) {
+        delay(10);
+    }
+
+    stop_motors();
+}
+
+// Move the robot a bit forward
+void move_a_bit() {
+    move_straight();
+    delay(200); // Adjust delay to move forward a bit
+    stop_motors();
+}
+
+// Detect the type of intersection based on sensor readings
+intersection detect_intersection() {
+    update_light_sensor();
+
+    if (strcmp(light_sensor, "00000") == 0) {
+        return DE;  // Dead end
+    } else if (strcmp(light_sensor, "00111") == 0) {
+        move_a_bit();
+        return RO;  // Right or straight
+    } else if (strcmp(light_sensor, "11100") == 0) {
+        move_a_bit();
+        return LO;  // Left or straight
+    } else if (strcmp(light_sensor, "11111") == 0) {
+        move_a_bit();
+        return EOM;  // End of maze
+    } else {
+        return CL;  // Continue line
+    }
+}
+
+// Handle movement based on the intersection type
+move move_handling(intersection i) {
+    switch (i) {
+        case DE:
+            turn_180();
+            return U;
+        case EOM:
+            stop_motors();
+            return ST;
+        case RO:
+            turn_right();
+            return R;
+        case LO:
+            turn_left();
+            return L;
+        case CL:
+            move_straight();
+            return S;
+        default:
+            move_straight();
+            return S;
+    }
+}
+
+// Record the move in the actual path
+void record_move(move m) {
+    ac_path[ac_path_len++] = m;
+}
+
+// Optimize the recorded path
+void optimize_path() {
+    // Copy actual path to optimized path initially
+    for (int i = 0; i < ac_path_len; i++) {
+        opt_path[i] = ac_path[i];
+    }
+    opt_path_len = ac_path_len;
+
+    // Perform optimization
+    while (isoptimizable()) {
+        // Output optimized path for debugging
+        for (int i = 0; i < opt_path_len; i++) {
+            Serial.print(opt_path[i]);
+            Serial.print(" ");
+        }
+        Serial.println();
+    }
+}
+
+// Check if the path can be optimized
+bool isoptimizable() {
+    for (int i = 0; i < opt_path_len - 2; i++) {
+        if (opt_path[i] == L && opt_path[i + 1] == U && opt_path[i + 2] == R) {
+            opt_path[i] = U;
+            optimize_moves(i);
+            return true;
+        }
+        // Add similar cases for other optimization patterns
+    }
+    return false;
+}
+
+// Optimize the moves by removing redundant steps
+void optimize_moves(int index) {
+    for (int i = index + 1; i < opt_path_len - 2; i++) {
+        opt_path[i] = opt_path[i + 2];
+    }
+    opt_path_len -= 2;
+}

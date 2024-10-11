@@ -1,0 +1,437 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <MPU6050.h>
+#include <string.h>
+
+// Motor Pin Definitions
+const int motorPin1 = 3;  // Motor 1 Forward
+const int motorPin2 = 4;  // Motor 1 Backward
+const int motorPWM1 = 5;  // Motor 1 PWM Speed
+
+const int motorPin3 = 6;  // Motor 2 Forward
+const int motorPin4 = 7;  // Motor 2 Backward
+const int motorPWM2 = 9;  // Motor 2 PWM Speed
+
+// IR Sensor Pin Definitions
+const int IR1 = A0;  // First IR sensor
+const int IR2 = A1;  // Second IR sensor
+const int IR3 = A2;  // Center IR sensor
+const int IR4 = A3;  // Fourth IR sensor
+const int IR5 = A4;  // Fifth IR sensor
+
+// MPU6050 for IMU-based orientation control
+MPU6050 mpu;
+
+// Enumerations for moves and intersections
+enum move { R, L, S, U, ExI, ST };
+enum intersection { DE, EOM, S_R, S_L, CR, T, RO, LO, CL };
+
+// Global variables
+char light_sensor[6];  // Store IR sensor states (null-terminated string)
+char ac_path[100];     // Dry run path
+int ac_path_len = 0;   // Length of the actual path
+char opt_path[100];    // Optimized path
+int opt_path_len = 0;  // Length of the optimized path
+
+void setup() {
+    Wire.begin();
+    mpu.initialize();
+    
+    // Motor setup
+    pinMode(motorPin1, OUTPUT);
+    pinMode(motorPin2, OUTPUT);
+    pinMode(motorPWM1, OUTPUT);
+    
+    pinMode(motorPin3, OUTPUT);
+    pinMode(motorPin4, OUTPUT);
+    pinMode(motorPWM2, OUTPUT);
+
+    // IR Sensor setup
+    pinMode(IR1, INPUT);
+    pinMode(IR2, INPUT);
+    pinMode(IR3, INPUT);
+    pinMode(IR4, INPUT);
+    pinMode(IR5, INPUT);
+
+    Serial.begin(9600);
+}
+
+void loop() {
+    enum move m = S;     // Initial move
+    enum intersection i;
+
+    // Dry run: Record path
+    while (m != ST) {
+        // Detect sensors
+        light_sensor[0] = digitalRead(IR1) ? '1' : '0';
+        light_sensor[1] = digitalRead(IR2) ? '1' : '0';
+        light_sensor[2] = digitalRead(IR3) ? '1' : '0';
+        light_sensor[3] = digitalRead(IR4) ? '1' : '0';
+        light_sensor[4] = digitalRead(IR5) ? '1' : '0';
+        light_sensor[5] = '\0'; // Null-terminate the string
+
+        // Follow the line
+        while (strcmp(light_sensor, "00100") != 0) {
+            if (strcmp(light_sensor, "00001") == 0 || strcmp(light_sensor, "00011") == 0) {
+                // Turn right
+                float initial_yaw = 0.0; // Placeholder value
+                float target_yaw = initial_yaw + 90.0;
+                if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+                digitalWrite(motorPin1, HIGH);
+                digitalWrite(motorPin2, LOW);
+                digitalWrite(motorPin3, LOW);
+                digitalWrite(motorPin4, HIGH);
+                analogWrite(motorPWM1, 100);
+                analogWrite(motorPWM2, 100);
+
+                while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                    delay(10);
+                }
+
+                // Stop motors
+                analogWrite(motorPWM1, 0);
+                analogWrite(motorPWM2, 0);
+            } else if (strcmp(light_sensor, "01100") == 0) {
+                // Turn left
+                float initial_yaw = 0.0; // Placeholder value
+                float target_yaw = initial_yaw - 90.0;
+                if (target_yaw < 0.0) target_yaw += 360.0;
+
+                digitalWrite(motorPin1, LOW);
+                digitalWrite(motorPin2, HIGH);
+                digitalWrite(motorPin3, HIGH);
+                digitalWrite(motorPin4, LOW);
+                analogWrite(motorPWM1, 100);
+                analogWrite(motorPWM2, 100);
+
+                while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                    delay(10);
+                }
+
+                // Stop motors
+                analogWrite(motorPWM1, 0);
+                analogWrite(motorPWM2, 0);
+            } else if (strcmp(light_sensor, "00110") == 0) {
+                // Move straight
+                digitalWrite(motorPin1, HIGH);
+                digitalWrite(motorPin2, LOW);
+                digitalWrite(motorPin3, HIGH);
+                digitalWrite(motorPin4, LOW);
+                analogWrite(motorPWM1, 150);
+                analogWrite(motorPWM2, 150);
+            }
+
+            // Update sensor values
+            light_sensor[0] = digitalRead(IR1) ? '1' : '0';
+            light_sensor[1] = digitalRead(IR2) ? '1' : '0';
+            light_sensor[2] = digitalRead(IR3) ? '1' : '0';
+            light_sensor[3] = digitalRead(IR4) ? '1' : '0';
+            light_sensor[4] = digitalRead(IR5) ? '1' : '0';
+            light_sensor[5] = '\0'; // Null-terminate the string
+        }
+
+        // Intersection handling
+        while (strcmp(light_sensor, "00100") == 0) {
+            // Move straight
+            digitalWrite(motorPin1, HIGH);
+            digitalWrite(motorPin2, LOW);
+            digitalWrite(motorPin3, HIGH);
+            digitalWrite(motorPin4, LOW);
+            analogWrite(motorPWM1, 150);
+            analogWrite(motorPWM2, 150);
+
+            // Update sensor values
+            light_sensor[0] = digitalRead(IR1) ? '1' : '0';
+            light_sensor[1] = digitalRead(IR2) ? '1' : '0';
+            light_sensor[2] = digitalRead(IR3) ? '1' : '0';
+            light_sensor[3] = digitalRead(IR4) ? '1' : '0';
+            light_sensor[4] = digitalRead(IR5) ? '1' : '0';
+            light_sensor[5] = '\0'; // Null-terminate the string
+        }
+
+        // Determine intersection type
+        if (strcmp(light_sensor, "00000") == 0) {
+            i = DE;  // Dead end
+        } else if (strcmp(light_sensor, "00111") == 0) {
+            // Move a bit forward
+            digitalWrite(motorPin1, HIGH);
+            digitalWrite(motorPin2, LOW);
+            digitalWrite(motorPin3, HIGH);
+            digitalWrite(motorPin4, LOW);
+            analogWrite(motorPWM1, 150);
+            analogWrite(motorPWM2, 150);
+            delay(200);
+            analogWrite(motorPWM1, 0);
+            analogWrite(motorPWM2, 0);
+
+            i = RO;  // Right or straight
+        } else if (strcmp(light_sensor, "11100") == 0) {
+            // Move a bit forward
+            digitalWrite(motorPin1, HIGH);
+            digitalWrite(motorPin2, LOW);
+            digitalWrite(motorPin3, HIGH);
+            digitalWrite(motorPin4, LOW);
+            analogWrite(motorPWM1, 150);
+            analogWrite(motorPWM2, 150);
+            delay(200);
+            analogWrite(motorPWM1, 0);
+            analogWrite(motorPWM2, 0);
+
+            i = LO;  // Left or straight
+        } else if (strcmp(light_sensor, "11111") == 0) {
+            // Move a bit forward
+            digitalWrite(motorPin1, HIGH);
+            digitalWrite(motorPin2, LOW);
+            digitalWrite(motorPin3, HIGH);
+            digitalWrite(motorPin4, LOW);
+            analogWrite(motorPWM1, 150);
+            analogWrite(motorPWM2, 150);
+            delay(200);
+            analogWrite(motorPWM1, 0);
+            analogWrite(motorPWM2, 0);
+
+            i = EOM;  // End of maze
+        } else {
+            i = CL;  // Continue line
+        }
+
+        // Move handling based on intersection
+        switch (i) {
+            case DE:
+                // Turn 180 degrees
+                {
+                    float initial_yaw = 0.0; // Placeholder value
+                    float target_yaw = initial_yaw + 180.0;
+                    if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+                    digitalWrite(motorPin1, HIGH);
+                    digitalWrite(motorPin2, LOW);
+                    digitalWrite(motorPin3, LOW);
+                    digitalWrite(motorPin4, HIGH);
+                    analogWrite(motorPWM1, 100);
+                    analogWrite(motorPWM2, 100);
+
+                    while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                        delay(10);
+                    }
+
+                    // Stop motors
+                    analogWrite(motorPWM1, 0);
+                    analogWrite(motorPWM2, 0);
+                }
+                m = U;
+                break;
+            case EOM:
+                // Stop the robot
+                analogWrite(motorPWM1, 0);
+                analogWrite(motorPWM2, 0);
+                m = ST;
+                break;
+            case RO:
+                // Turn right
+                {
+                    float initial_yaw = 0.0; // Placeholder value
+                    float target_yaw = initial_yaw + 90.0;
+                    if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+                    digitalWrite(motorPin1, HIGH);
+                    digitalWrite(motorPin2, LOW);
+                    digitalWrite(motorPin3, LOW);
+                    digitalWrite(motorPin4, HIGH);
+                    analogWrite(motorPWM1, 100);
+                    analogWrite(motorPWM2, 100);
+
+                    while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                        delay(10);
+                    }
+
+                    // Stop motors
+                    analogWrite(motorPWM1, 0);
+                    analogWrite(motorPWM2, 0);
+                }
+                m = R;
+                break;
+            case LO:
+                // Turn left
+                {
+                    float initial_yaw = 0.0; // Placeholder value
+                    float target_yaw = initial_yaw - 90.0;
+                    if (target_yaw < 0.0) target_yaw += 360.0;
+
+                    digitalWrite(motorPin1, LOW);
+                    digitalWrite(motorPin2, HIGH);
+                    digitalWrite(motorPin3, HIGH);
+                    digitalWrite(motorPin4, LOW);
+                    analogWrite(motorPWM1, 100);
+                    analogWrite(motorPWM2, 100);
+
+                    while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                        delay(10);
+                    }
+
+                    // Stop motors
+                    analogWrite(motorPWM1, 0);
+                    analogWrite(motorPWM2, 0);
+                }
+                m = L;
+                break;
+            case CL:
+                // Continue straight
+                m = S;
+                break;
+            default:
+                m = S;
+                break;
+        }
+
+        // Record the move
+        ac_path[ac_path_len++] = m;
+    }
+
+    // Optimize the path after dry run
+    // Copy actual path to optimized path initially
+    for (int i = 0; i < ac_path_len; i++) {
+        opt_path[i] = ac_path[i];
+    }
+    opt_path_len = ac_path_len;
+
+    // Perform optimization
+    bool optimized = true;
+    while (optimized) {
+        optimized = false;
+        int i = 0;
+
+        while (i + 2 < opt_path_len) {
+            char temp_path[4];
+            temp_path[0] = opt_path[i];
+            temp_path[1] = opt_path[i + 1];
+            temp_path[2] = opt_path[i + 2];
+            temp_path[3] = '\0';
+
+            // Apply optimization rules
+            if (strcmp(temp_path, "LUR") == 0) {
+                opt_path[i] = U;
+                // Shift the array to remove two elements
+                for (int j = i + 1; j < opt_path_len - 2; j++) {
+                    opt_path[j] = opt_path[j + 2];
+                }
+                opt_path_len -= 2;
+                optimized = true;
+                break;
+            }
+            // Add similar cases for other optimization patterns
+            i++;
+        }
+    }
+
+    // Follow the optimized path during the actual run
+    for (int i = 0; i < opt_path_len; i++) {
+        enum move m = (enum move)opt_path[i];
+
+        switch(m) {
+            case R:
+                // Turn right
+                {
+                    float initial_yaw = 0.0; // Placeholder value
+                    float target_yaw = initial_yaw + 90.0;
+                    if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+                    digitalWrite(motorPin1, HIGH);
+                    digitalWrite(motorPin2, LOW);
+                    digitalWrite(motorPin3, LOW);
+                    digitalWrite(motorPin4, HIGH);
+                    analogWrite(motorPWM1, 100);
+                    analogWrite(motorPWM2, 100);
+
+                    while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                        delay(10);
+                    }
+
+                    // Stop motors
+                    analogWrite(motorPWM1, 0);
+                    analogWrite(motorPWM2, 0);
+                }
+                break;
+            case L:
+                // Turn left
+                {
+                    float initial_yaw = 0.0; // Placeholder value
+                    float target_yaw = initial_yaw - 90.0;
+                    if (target_yaw < 0.0) target_yaw += 360.0;
+
+                    digitalWrite(motorPin1, LOW);
+                    digitalWrite(motorPin2, HIGH);
+                    digitalWrite(motorPin3, HIGH);
+                    digitalWrite(motorPin4, LOW);
+                    analogWrite(motorPWM1, 100);
+                    analogWrite(motorPWM2, 100);
+
+                    while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                        delay(10);
+                    }
+
+                    // Stop motors
+                    analogWrite(motorPWM1, 0);
+                    analogWrite(motorPWM2, 0);
+                }
+                break;
+            case S:
+                // Move straight
+                digitalWrite(motorPin1, HIGH);
+                digitalWrite(motorPin2, LOW);
+                digitalWrite(motorPin3, HIGH);
+                digitalWrite(motorPin4, LOW);
+                analogWrite(motorPWM1, 150);
+                analogWrite(motorPWM2, 150);
+                delay(500); // Adjust delay for distance
+                analogWrite(motorPWM1, 0);
+                analogWrite(motorPWM2, 0);
+                break;
+            case U:
+                // Turn 180 degrees
+                {
+                    float initial_yaw = 0.0; // Placeholder value
+                    float target_yaw = initial_yaw + 180.0;
+                    if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+                    digitalWrite(motorPin1, HIGH);
+                    digitalWrite(motorPin2, LOW);
+                    digitalWrite(motorPin3, LOW);
+                    digitalWrite(motorPin4, HIGH);
+                    analogWrite(motorPWM1, 100);
+                    analogWrite(motorPWM2, 100);
+
+                    while (abs(0.0 - target_yaw) > 1.0) { // Replace 0.0 with actual yaw value
+                        delay(10);
+                    }
+
+                    // Stop motors
+                    analogWrite(motorPWM1, 0);
+                    analogWrite(motorPWM2, 0);
+                }
+                break;
+            case ExI:
+                // Move a bit forward
+                digitalWrite(motorPin1, HIGH);
+                digitalWrite(motorPin2, LOW);
+                digitalWrite(motorPin3, HIGH);
+                digitalWrite(motorPin4, LOW);
+                analogWrite(motorPWM1, 150);
+                analogWrite(motorPWM2, 150);
+                delay(200);
+                analogWrite(motorPWM1, 0);
+                analogWrite(motorPWM2, 0);
+                break;
+            case ST:
+                // Stop the robot
+                analogWrite(motorPWM1, 0);
+                analogWrite(motorPWM2, 0);
+                break;
+        }
+        delay(500);  // Adjust delay for smoother transitions
+    }
+
+    // End of the loop
+    while (1); // Stop the loop
+}

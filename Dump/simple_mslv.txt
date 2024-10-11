@@ -1,0 +1,116 @@
+// Pin definitions for TB6612FNG motor driver
+#define AIN1 9    // Motor A direction 1
+#define AIN2 10   // Motor A direction 2
+#define PWMA 11   // Motor A PWM speed
+#define BIN1 5    // Motor B direction 1
+#define BIN2 6    // Motor B direction 2
+#define PWMB 3    // Motor B PWM speed
+#define STBY 8    // Standby pin
+
+// RLS08 IR Sensor Pins
+#define SENSOR1 A1  // Analog input from sensor 1 (or D1 for digital)
+#define SENSOR2 A2  // Analog input from sensor 2
+#define SENSOR3 A3  // Analog input from sensor 3
+#define SENSOR4 A4  // Analog input from sensor 4
+#define SENSOR5 A5  // Analog input from sensor 5
+#define SENSOR6 A6  // Analog input from sensor 6
+#define SENSOR7 A7  // Analog input from sensor 7
+#define SENSOR8 A8  // Analog input from sensor 8
+
+// Motor speed settings
+int baseSpeed = 150; // Adjust motor speed as needed (0-255)
+int turnSpeed = 100; // Speed for turning
+
+void setup() {
+  // Motor driver pin modes
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+  pinMode(PWMA, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
+  pinMode(PWMB, OUTPUT);
+  pinMode(STBY, OUTPUT);
+
+  // IR sensor pins
+  pinMode(SENSOR1, INPUT);
+  pinMode(SENSOR2, INPUT);
+  pinMode(SENSOR3, INPUT);
+  pinMode(SENSOR4, INPUT);
+  pinMode(SENSOR5, INPUT);
+  pinMode(SENSOR6, INPUT);
+  pinMode(SENSOR7, INPUT);
+  pinMode(SENSOR8, INPUT);
+
+  digitalWrite(STBY, HIGH);  // Take motor driver out of standby
+}
+
+void loop() {
+  // Read sensors
+  int sensor1 = analogRead(SENSOR1); 
+  int sensor2 = analogRead(SENSOR2);
+  int sensor3 = analogRead(SENSOR3);
+  int sensor4 = analogRead(SENSOR4);
+  int sensor5 = analogRead(SENSOR5);
+  int sensor6 = analogRead(SENSOR6);
+  int sensor7 = analogRead(SENSOR7);
+  int sensor8 = analogRead(SENSOR8);
+
+  // Threshold for detecting the black line (adjust based on your surface)
+  int threshold = 500;
+
+  // Line-following with left-hand maze-solving logic
+  if (sensor1 > threshold || sensor2 > threshold) {
+    // Left sensors detect a line (turn left)
+    turnLeft(turnSpeed);
+  } else if (sensor7 > threshold || sensor8 > threshold) {
+    // Right sensors detect a line (turn right)
+    turnRight(turnSpeed);
+  } else if (sensor3 > threshold || sensor4 > threshold || sensor5 > threshold || sensor6 > threshold) {
+    // Middle sensors detect a line (move forward)
+    moveForward(baseSpeed);
+  } else {
+    // No sensors detect a line (stop)
+    stopMotors();
+  }
+}
+
+void moveForward(int speed) {
+  // Motor A forward
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
+  analogWrite(PWMA, speed);
+
+  // Motor B forward
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
+  analogWrite(PWMB, speed);
+}
+
+void turnLeft(int speed) {
+  // Motor A backward
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, HIGH);
+  analogWrite(PWMA, speed);
+
+  // Motor B forward
+  digitalWrite(BIN1, HIGH);
+  digitalWrite(BIN2, LOW);
+  analogWrite(PWMB, speed);
+}
+
+void turnRight(int speed) {
+  // Motor A forward
+  digitalWrite(AIN1, HIGH);
+  digitalWrite(AIN2, LOW);
+  analogWrite(PWMA, speed);
+
+  // Motor B backward
+  digitalWrite(BIN1, LOW);
+  digitalWrite(BIN2, HIGH);
+  analogWrite(PWMB, speed);
+}
+
+void stopMotors() {
+  analogWrite(PWMA, 0);
+  analogWrite(PWMB, 0);
+}

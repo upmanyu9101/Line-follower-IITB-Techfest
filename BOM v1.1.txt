@@ -1,0 +1,7 @@
+MCU:Teensy 4.1
+Motor: N20 motor 1000rpm with encoder
+Motor controller: TB6612FNG
+IMU:Mpu 6050
+Sensors:
+1.SmartElex RLS-08
+2.TCRT5000 Single channel 

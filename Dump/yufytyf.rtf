@@ -1,0 +1,210 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2761
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 #include <Wire.h>\
+#include <QuickPID.h>        // For PID control\
+#include <Adafruit_MPU6050.h> // MPU6050 for IMU (optional, used for motion tracking)\
+#include <Adafruit_Sensor.h>  // Unified sensor library\
+\
+// Define motor control pins\
+#define motorA1 5  // IN1 for Motor A (D1 on NodeMCU)\
+#define motorA2 4  // IN2 for Motor A (D2 on NodeMCU)\
+#define motorB1 0  // IN3 for Motor B (D3 on NodeMCU)\
+#define motorB2 2  // IN4 for Motor B (D4 on NodeMCU)\
+\
+#define NUM_SENSORS 8\
+int sensorPins[NUM_SENSORS] = \{D1, D2, D3, D4, D5, D6, D7, D8\};  // Adjust to your sensor array\
+int sensorValues[NUM_SENSORS];  // Store sensor readings\
+int baseSpeed = 100;            // Base speed of the motors\
+int maxSpeed = 255;             // Maximum speed of the motors\
+\
+// PID parameters\
+float kp = 1.0, ki = 0.0, kd = 0.0;  // Initial PID parameters (adjust dynamically)\
+float input, output, setpoint;\
+int error = 0, lastError = 0;      // Error tracking for PID\
+bool lineDetected = false;         // Detect if the line is present\
+bool optimizingPath = false;       // Flag for path optimization\
+\
+QuickPID myPID(&input, &output, &setpoint, kp, ki, kd);\
+\
+// For A* algorithm\
+struct Node \{\
+  int x, y;\
+  float cost, heuristic;\
+  Node* parent;\
+  Node(int _x, int _y, float _cost, float _heuristic, Node* _parent) \
+    : x(_x), y(_y), cost(_cost), heuristic(_heuristic), parent(_parent) \{\}\
+\};\
+std::vector<Node*> path, optimizedPath;\
+\
+void setup() \{\
+  Serial.begin(9600);\
+  \
+  // Motor control pin initialization\
+  pinMode(motorA1, OUTPUT);\
+  pinMode(motorA2, OUTPUT);\
+  pinMode(motorB1, OUTPUT);\
+  pinMode(motorB2, OUTPUT);\
+\
+  // Initialize PID\
+  myPID.SetMode(QuickPID::AUTOMATIC);\
+  myPID.SetOutputLimits(-maxSpeed, maxSpeed);  // Limit the motor speeds\
+\
+  // Sensor setup (using digitalRead for RLS08 sensor array)\
+  for (int i = 0; i < NUM_SENSORS; i++) \{\
+    pinMode(sensorPins[i], INPUT);\
+  \}\
+\}\
+\
+void loop() \{\
+  readSensors();  // Read the sensor array\
+  calculateError();  // Calculate error based on sensor readings\
+  \
+  // Apply PID control\
+  setpoint = 0;  // The goal is to have an error of 0 (perfectly aligned)\
+  input = error;\
+  myPID.Compute();\
+\
+  // Adjust motor speeds based on PID output\
+  int leftSpeed = baseSpeed - output;\
+  int rightSpeed = baseSpeed + output;\
+\
+  moveMotors(leftSpeed, rightSpeed);  // Move motors based on PID output\
+\
+  // Check for maze and solve with A*\
+  if (detectMaze()) \{\
+    runAStar();  // Call the A* algorithm to solve the maze\
+    optimizePath();  // Optimize path after the first dry run\
+  \}\
+\}\
+\
+void readSensors() \{\
+  for (int i = 0; i < NUM_SENSORS; i++) \{\
+    sensorValues[i] = digitalRead(sensorPins[i]);  // Read digital values for the line\
+    if (sensorValues[i] == 0) \{  // 0 for black, 1 for white\
+      lineDetected = true;\
+    \}\
+  \}\
+\}\
+\
+void calculateError() \{\
+  // Simple proportional error calculation (difference between left and right sensors)\
+  int sumLeft = 0, sumRight = 0;\
+  for (int i = 0; i < NUM_SENSORS / 2; i++) \{\
+    sumLeft += sensorValues[i];\
+    sumRight += sensorValues[i + NUM_SENSORS / 2];\
+  \}\
+  error = sumLeft - sumRight;\
+\}\
+\
+void runAStar() \{\
+  std::vector<Node*> openSet;\
+  std::vector<Node*> closedSet;\
+  Node* start = new Node(0, 0, 0, 0, nullptr);  // Starting point\
+  Node* goal = new Node(5, 5, 0, 0, nullptr);   // Goal point (modify as needed)\
+\
+  openSet.push_back(start);\
+  \
+  while (!openSet.empty()) \{\
+    // Find node with lowest heuristic\
+    Node* current = openSet[0];\
+    for (auto node : openSet) \{\
+      if (node->cost + node->heuristic < current->cost + current->heuristic) \{\
+        current = node;\
+      \}\
+    \}\
+\
+    // If goal is reached\
+    if (current->x == goal->x && current->y == goal->y) \{\
+      path.clear();\
+      while (current != nullptr) \{\
+        path.push_back(current);\
+        current = current->parent;\
+      \}\
+      return;\
+    \}\
+\
+    // Move from open to closed set\
+    openSet.erase(std::remove(openSet.begin(), openSet.end(), current), openSet.end());\
+    closedSet.push_back(current);\
+\
+    // Generate neighbors (4-direction movement)\
+    std::vector<Node*> neighbors = \{\
+      new Node(current->x + 1, current->y, current->cost + 1, 0, current),\
+      new Node(current->x - 1, current->y, current->cost + 1, 0, current),\
+      new Node(current->x, current->y + 1, current->cost + 1, 0, current),\
+      new Node(current->x, current->y - 1, current->cost + 1, 0, current)\
+    \};\
+\
+    for (auto neighbor : neighbors) \{\
+      // Skip if already in closed set\
+      if (std::find_if(closedSet.begin(), closedSet.end(), [&](Node* n) \{\
+        return n->x == neighbor->x && n->y == neighbor->y;\
+      \}) != closedSet.end()) \{\
+        continue;\
+      \}\
+\
+      // If not in open set, add it\
+      auto it = std::find_if(openSet.begin(), openSet.end(), [&](Node* n) \{\
+        return n->x == neighbor->x && n->y == neighbor->y;\
+      \});\
+\
+      if (it == openSet.end()) \{\
+        neighbor->heuristic = heuristic(neighbor, goal);  // Add heuristic\
+        openSet.push_back(neighbor);\
+      \}\
+    \}\
+  \}\
+\}\
+\
+float heuristic(Node* a, Node* b) \{\
+  // Manhattan distance heuristic (can be modified based on maze structure)\
+  return abs(a->x - b->x) + abs(a->y - b->y);\
+\}\
+\
+void optimizePath() \{\
+  if (!optimizingPath) \{\
+    // Simplest optimization: Remove redundant nodes (nodes on the same straight line)\
+    for (size_t i = 1; i < path.size() - 1; i++) \{\
+      if ((path[i - 1]->x == path[i]->x && path[i]->x == path[i + 1]->x) ||\
+          (path[i - 1]->y == path[i]->y && path[i]->y == path[i + 1]->y)) \{\
+        path.erase(path.begin() + i);\
+        i--;  // Adjust index after removal\
+      \}\
+    \}\
+    optimizingPath = true;\
+  \}\
+\}\
+\
+void moveMotors(int leftSpeed, int rightSpeed) \{\
+  // Ensure speed is within bounds\
+  leftSpeed = constrain(leftSpeed, 0, maxSpeed);\
+  rightSpeed = constrain(rightSpeed, 0, maxSpeed);\
+  \
+  if (leftSpeed > 0) \{\
+    digitalWrite(motorA1, HIGH);\
+    digitalWrite(motorA2, LOW);\
+  \} else \{\
+    digitalWrite(motorA1, LOW);\
+    digitalWrite(motorA2, HIGH);\
+  \}\
+  \
+  if (rightSpeed > 0) \{\
+    digitalWrite(motorB1, HIGH);\
+    digitalWrite(motorB2, LOW);\
+  \} else \{\
+    digitalWrite(motorB1, LOW);\
+    digitalWrite(motorB2, HIGH);\
+  \}\
+\}\
+\
+void stopMotors() \{\
+  digitalWrite(motorA1, LOW);\
+  digitalWrite(motorA2, LOW);\
+  digitalWrite(motorB1, LOW);\
+  digitalWrite(motorB2, LOW);\
+\}}

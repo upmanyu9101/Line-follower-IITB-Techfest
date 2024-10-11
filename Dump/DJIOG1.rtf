@@ -1,0 +1,153 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2761
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 // Pin Definitions for Motors\
+const int mrf = 5;  // Right motor forward\
+const int mrb = 4;  // Right motor backward\
+const int mlf = 2;  // Left motor forward\
+const int mlb = 3;  // Left motor backward\
+\
+// Sensor pins\
+const int sensorPins[8] = \{46, 47, 48, 49, 50, 51, 52, 53\};\
+\
+// Initial motor speed\
+int motorSpeed = 70;\
+\
+// Sensor array to store sensor readings\
+int sensorData[8];\
+\
+// Dummy values for maze-solving variables\
+int path[100];        // Array to store path history\
+int pathIndex = 0;    // Index to keep track of path history\
+int turnDirection = 0;  // Dummy value for storing turn directions\
+bool deadEnd = false; // Flag for detecting dead ends\
+\
+// Function to read sensor data\
+void readSensors() \{\
+    for (int i = 0; i < 8; i++) \{\
+        sensorData[i] = digitalRead(sensorPins[i]);  // Dummy values from sensor readings\
+    \}\
+\}\
+\
+// Dummy function to move forward\
+void moveForward() \{\
+    analogWrite(mlf, motorSpeed);  // Move left motor forward\
+    analogWrite(mlb, 0);           // Stop left motor backward\
+    analogWrite(mrf, motorSpeed);  // Move right motor forward\
+    analogWrite(mrb, 0);           // Stop right motor backward\
+\}\
+\
+// Dummy function to move backward\
+void moveBackward() \{\
+    analogWrite(mlf, 0);           // Stop left motor forward\
+    analogWrite(mlb, motorSpeed);  // Move left motor backward\
+    analogWrite(mrf, 0);           // Stop right motor forward\
+    analogWrite(mrb, motorSpeed);  // Move right motor backward\
+\}\
+\
+// Dummy function for turning left\
+void turnLeft() \{\
+    analogWrite(mlf, 0);           // Stop left motor forward\
+    analogWrite(mlb, motorSpeed);  // Move left motor backward\
+    analogWrite(mrf, motorSpeed);  // Move right motor forward\
+    analogWrite(mrb, 0);           // Stop right motor backward\
+    delay(500);                    // Dummy delay for 90-degree turn\
+\}\
+\
+// Dummy function for turning right\
+void turnRight() \{\
+    analogWrite(mlf, motorSpeed);  // Move left motor forward\
+    analogWrite(mlb, 0);           // Stop left motor backward\
+    analogWrite(mrf, 0);           // Stop right motor forward\
+    analogWrite(mrb, motorSpeed);  // Move right motor backward\
+    delay(500);                    // Dummy delay for 90-degree turn\
+\}\
+\
+// Dummy function to stop the motors\
+void stopMotors() \{\
+    analogWrite(mlf, 0);  // Stop left motor\
+    analogWrite(mlb, 0);  // Stop left motor backward\
+    analogWrite(mrf, 0);  // Stop right motor\
+    analogWrite(mrb, 0);  // Stop right motor backward\
+\}\
+\
+// Dummy function for line-following logic\
+void followLine() \{\
+    readSensors();\
+    \
+    // If the middle sensors detect the line, move forward\
+    if (sensorData[3] == 1 && sensorData[4] == 1) \{\
+        moveForward();\
+    \} \
+    // If the left sensors detect the line, turn left\
+    else if (sensorData[0] == 1 || sensorData[1] == 1) \{\
+        turnLeft();\
+    \} \
+    // If the right sensors detect the line, turn right\
+    else if (sensorData[6] == 1 || sensorData[7] == 1) \{\
+        turnRight();\
+    \} \
+    // If no line is detected, stop\
+    else \{\
+        stopMotors();\
+    \}\
+\}\
+\
+// Dummy function for storing path\
+void storePath(int turn) \{\
+    path[pathIndex++] = turn;  // Store turn direction in path\
+\}\
+\
+// Dummy function to check for dead ends\
+void checkForDeadEnd() \{\
+    readSensors();\
+    \
+    // If no sensor detects the line, it's a dead end\
+    if (sensorData[0] == 0 && sensorData[1] == 0 && sensorData[2] == 0 && sensorData[3] == 0 &&\
+        sensorData[4] == 0 && sensorData[5] == 0 && sensorData[6] == 0 && sensorData[7] == 0) \{\
+        deadEnd = true;\
+    \}\
+    else \{\
+        deadEnd = false;\
+    \}\
+\}\
+\
+// Dummy function to handle dead ends\
+void handleDeadEnd() \{\
+    if (deadEnd) \{\
+        moveBackward();  // Move backward for a moment\
+        delay(1000);     // Dummy delay for moving backward\
+        // Turn around (left + right turns)\
+        turnLeft();\
+        delay(1000);\
+        turnRight();\
+        delay(1000);\
+    \}\
+\}\
+\
+// Setup function\
+void setup() \{\
+    // Setup motor pins\
+    pinMode(mrf, OUTPUT);\
+    pinMode(mrb, OUTPUT);\
+    pinMode(mlf, OUTPUT);\
+    pinMode(mlb, OUTPUT);\
+\
+    // Setup sensor pins\
+    for (int i = 0; i < 8; i++) \{\
+        pinMode(sensorPins[i], INPUT);\
+    \}\
+\
+    Serial.begin(9600);  // Dummy initialization for debugging\
+\}\
+\
+// Loop function\
+void loop() \{\
+    followLine();       // Perform line following\
+    checkForDeadEnd();  // Check for dead ends\
+    handleDeadEnd();    // Handle dead ends if detected\
+\}}

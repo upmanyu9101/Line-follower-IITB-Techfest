@@ -1,0 +1,140 @@
+// Pin definitions for TB6612FNG motor driver
+#define AIN1 9    // Motor A direction 1
+#define AIN2 10   // Motor A direction 2
+#define PWMA 11   // Motor A PWM speed
+#define BIN1 5    // Motor B direction 1
+#define BIN2 6    // Motor B direction 2
+#define PWMB 3    // Motor B PWM speed
+#define STBY 8    // Standby pin
+
+// Encoder pins
+#define ENCODER_A_A 2  // Encoder pin for Motor A
+#define ENCODER_B_A 4  // Encoder pin for Motor A
+#define ENCODER_A_B 12 // Encoder pin for Motor B
+#define ENCODER_B_B 7  // Encoder pin for Motor B
+
+// IMU constants
+#include <Wire.h>
+#include <MPU6050.h>  // Using MPU6050 library for IMU
+
+MPU6050 imu;
+
+// Encoder variables
+volatile long encoderTicksA = 0;
+volatile long encoderTicksB = 0;
+
+// Wheel and robot dimensions (example values, adjust based on your robot)
+float wheelDiameter = 0.03;  // 3 cm wheels
+float trackWidth = 0.1;      // 10 cm between the wheels
+
+// Proportional control constants
+float kp = 0.5;   // Proportional control constant (tune this)
+int baseTurnSpeed = 255;  // Max motor speed for turning
+int slowDownThreshold = 10; // Slow down within 10 degrees of the target
+
+// Encoder ticks for 90-degree turn (calculated based on wheel size and track width)
+int targetTicks = calculateEncoderTicksFor90Degrees();
+
+void setup() {
+  // Motor setup
+  pinMode(AIN1, OUTPUT);
+  pinMode(AIN2, OUTPUT);
+  pinMode(PWMA, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
+  pinMode(PWMB, OUTPUT);
+  pinMode(STBY, OUTPUT);
+
+  // Encoder setup
+  pinMode(ENCODER_A_A, INPUT);
+  pinMode(ENCODER_B_A, INPUT);
+  pinMode(ENCODER_A_B, INPUT);
+  pinMode(ENCODER_B_B, INPUT);
+  
+  // Attach interrupts for encoders
+  attachInterrupt(digitalPinToInterrupt(ENCODER_A_A), updateEncoderA, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_A_B), updateEncoderB, CHANGE);
+
+  // IMU initialization
+  Wire.begin();
+  imu.initialize();
+
+  // Take motor driver out of standby
+  digitalWrite(STBY, HIGH);
+}
+
+void loop() {
+  // Execute a 90-degree turn
+  executeFastTurn(90);
+  delay(1000); // Wait for a second before the next command (adjust based on your scenario)
+}
+
+// Function to calculate encoder ticks for 90-degree turn
+int calculateEncoderTicksFor90Degrees() {
+  float wheelCircumference = PI * wheelDiameter;
+  float turnCircumference = PI * trackWidth;  // Full turn circumference
+  float distancePer90Degrees = turnCircumference / 4;  // Distance for 90-degree turn
+  return (distancePer90Degrees / wheelCircumference) * ticksPerRevolution;
+}
+
+// Encoder ISR for Motor A
+void updateEncoderA() {
+  // Update encoder ticks for Motor A
+  encoderTicksA++;
+}
+
+// Encoder ISR for Motor B
+void updateEncoderB() {
+  // Update encoder ticks for Motor B
+  encoderTicksB++;
+}
+
+// Function to execute a fast 90-degree turn
+void executeFastTurn(int targetDegrees) {
+  float initialYaw = getIMUYaw();
+  float targetYaw = initialYaw + targetDegrees;
+  if (targetYaw > 360) targetYaw -= 360;  // Wrap around if needed
+
+  // Reset encoder counts
+  encoderTicksA = 0;
+  encoderTicksB = 0;
+
+  // Start turning
+  digitalWrite(AIN1, HIGH);  // Motor A forward
+  digitalWrite(AIN2, LOW);
+  analogWrite(PWMA, baseTurnSpeed);
+
+  digitalWrite(BIN1, LOW);   // Motor B backward
+  digitalWrite(BIN2, HIGH);
+  analogWrite(PWMB, baseTurnSpeed);
+
+  while (true) {
+    float currentYaw = getIMUYaw();
+    float yawError = targetYaw - currentYaw;
+
+    // Slow down as we approach the target angle
+    if (abs(yawError) < slowDownThreshold) {
+      int adjustedSpeed = baseTurnSpeed * (yawError / slowDownThreshold);
+      analogWrite(PWMA, max(adjustedSpeed, 0));
+      analogWrite(PWMB, max(adjustedSpeed, 0));
+    }
+
+    // Stop once within acceptable margin
+    if (abs(yawError) < 2) {  // Tune this margin
+      stopMotors();
+      break;
+    }
+  }
+}
+
+// Get current yaw angle from IMU
+float getIMUYaw() {
+  imu.update();
+  return imu.getYaw();  // Replace with the actual function to get the yaw angle
+}
+
+// Stop the motors
+void stopMotors() {
+  analogWrite(PWMA, 0);
+  analogWrite(PWMB, 0);
+}

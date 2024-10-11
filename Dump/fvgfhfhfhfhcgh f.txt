@@ -1,0 +1,31 @@
+// Define the sensor pins for the RLS08
+#define NUM_SENSORS 8
+int sensorPins[NUM_SENSORS] = {8, 7, 1, 2, 3, 4, 5, 6};  // Adjust for NodeMCU GPIO
+
+void setup() {
+  Serial.begin(9600);
+
+  // Initialize sensor pins as inputs
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    pinMode(sensorPins[i], INPUT);
+  }
+}
+
+void loop() {
+  // Read sensor values and print whether they detect black or white
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    int sensorValue = digitalRead(sensorPins[i]);
+    
+    if (sensorValue == HIGH) {
+      Serial.print("Sensor ");
+      Serial.print(i);
+      Serial.println(": White detected");
+    } else {
+      Serial.print("Sensor ");
+      Serial.print(i);
+      Serial.println(": Black detected");
+    }
+  }
+
+  delay(500);  // Small delay for readability
+}

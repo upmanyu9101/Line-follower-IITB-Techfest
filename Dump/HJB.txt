@@ -1,0 +1,183 @@
+// Define motor control pins
+#define motorA1 5  // IN1 for Motor A (D1 on NodeMCU)
+#define motorA2 4  // IN2 for Motor A (D2 on NodeMCU)
+#define motorB1 0  // IN3 for Motor B (D3 on NodeMCU)
+#define motorB2 2  // IN4 for Motor B (D4 on NodeMCU)
+
+// Define IR sensor pins (adjust these based on your setup)
+int sensorPins[] = {D1, D2, D3, D4, D5, D6};  // Assuming 6 sensors
+int numSensors = 6;
+int sensorValues[6];
+
+// Proportional control constant
+float Kp = 0.5;
+int baseSpeed = 150;  // Base motor speed (adjust as needed)
+
+// Path storage (very basic, just stores the turn directions)
+char path[100];  // Simplified path storage
+int pathIndex = 0;
+
+void setup() {
+  // Initialize motor control pins
+  pinMode(motorA1, OUTPUT);
+  pinMode(motorA2, OUTPUT);
+  pinMode(motorB1, OUTPUT);
+  pinMode(motorB2, OUTPUT);
+
+  // Initialize IR sensor pins
+  for (int i = 0; i < numSensors; i++) {
+    pinMode(sensorPins[i], INPUT);
+  }
+
+  Serial.begin(9600);
+}
+
+void loop() {
+  // Read sensor values
+  readSensors();
+
+  // Calculate the position error
+  float error = calculateError();
+
+  // Proportional control
+  float adjustment = Kp * error;
+  
+  // Adjust motor speeds based on error
+  int leftMotorSpeed = baseSpeed + adjustment;
+  int rightMotorSpeed = baseSpeed - adjustment;
+
+  // Set motor speeds
+  setMotorSpeed(leftMotorSpeed, rightMotorSpeed);
+
+  // Check if a turn is needed (based on path conditions)
+  if (isTurnNeeded()) {
+    char turnDirection = detectTurnDirection();  // Simplified turn detection
+    storeTurn(turnDirection);
+    makeTurn(turnDirection);
+  }
+
+  // Optimize path after a dry run
+  if (isEndOfPath()) {
+    optimizePath();
+  }
+
+  delay(100);  // Small delay for control stability
+}
+
+// Function to read sensor values
+void readSensors() {
+  for (int i = 0; i < numSensors; i++) {
+    sensorValues[i] = digitalRead(sensorPins[i]);
+  }
+}
+
+// Function to calculate the error (difference from center line)
+float calculateError() {
+  int sum = 0;
+  int count = 0;
+
+  for (int i = 0; i < numSensors; i++) {
+    if (sensorValues[i] == 0) {  // Black line detected
+      sum += (i - (numSensors / 2)) * 100;  // Position scaling
+      count++;
+    }
+  }
+
+  if (count == 0) {
+    return 0;  // No line detected
+  } else {
+    return sum / count;
+  }
+}
+
+// Function to set motor speeds
+void setMotorSpeed(int leftSpeed, int rightSpeed) {
+  analogWrite(motorA1, leftSpeed);
+  analogWrite(motorA2, 0);
+  analogWrite(motorB1, rightSpeed);
+  analogWrite(motorB2, 0);
+}
+
+// Check if a turn is needed (simplified version)
+bool isTurnNeeded() {
+  // Check if the middle sensor is off the line (no line detected)
+  return sensorValues[2] == 1 && sensorValues[3] == 1;  // Adjust as needed
+}
+
+// Detect the turn direction (simplified logic)
+char detectTurnDirection() {
+  if (sensorValues[0] == 0) {
+    return 'L';  // Turn left
+  } else if (sensorValues[5] == 0) {
+    return 'R';  // Turn right
+  } else {
+    return 'S';  // Go straight
+  }
+}
+
+// Store the turn direction
+void storeTurn(char turn) {
+  path[pathIndex++] = turn;
+}
+
+// Make the detected turn
+void makeTurn(char turn) {
+  switch (turn) {
+    case 'L':
+      turnLeft();
+      break;
+    case 'R':
+      turnRight();
+      break;
+    case 'S':
+      moveForward();
+      break;
+  }
+}
+
+// Move forward (for straight paths)
+void moveForward() {
+  digitalWrite(motorA1, HIGH);
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, HIGH);
+  digitalWrite(motorB2, LOW);
+}
+
+// Turn left
+void turnLeft() {
+  digitalWrite(motorA1, LOW);
+  digitalWrite(motorA2, HIGH);
+  digitalWrite(motorB1, HIGH);
+  digitalWrite(motorB2, LOW);
+  delay(500);  // Adjust delay for a 90-degree turn
+}
+
+// Turn right
+void turnRight() {
+  digitalWrite(motorA1, HIGH);
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, LOW);
+  digitalWrite(motorB2, HIGH);
+  delay(500);  // Adjust delay for a 90-degree turn
+}
+
+// Check if the bot has reached the end of the path
+bool isEndOfPath() {
+  // Define logic to detect the end of the path (for example, based on sensor values)
+  return false;  // Placeholder
+}
+
+// Optimize the path (simplified: remove dead ends)
+void optimizePath() {
+  // Simplified path optimization logic
+  int newIndex = 0;
+  for (int i = 0; i < pathIndex; i++) {
+    // Remove back-and-forth turns (e.g., L->R or R->L)
+    if ((path[i] == 'L' && path[i+1] == 'R') || (path[i] == 'R' && path[i+1] == 'L')) {
+      i++;  // Skip the next turn
+    } else {
+      path[newIndex++] = path[i];  // Copy valid turn
+    }
+  }
+  pathIndex = newIndex;  // Update path length
+}

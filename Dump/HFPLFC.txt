@@ -1,0 +1,323 @@
+#include <Wire.h>
+#include <MPU6050.h>
+
+// Motor and Encoder Pin Definitions
+const int motorPin1 = 3;  // Motor 1 Forward
+const int motorPin2 = 4;  // Motor 1 Backward
+const int motorPWM1 = 5;  // Motor 1 PWM Speed
+
+const int motorPin3 = 6;  // Motor 2 Forward
+const int motorPin4 = 7;  // Motor 2 Backward
+const int motorPWM2 = 9;  // Motor 2 PWM Speed
+
+const int encoderA1 = 2;  // Encoder A pin for motor 1
+const int encoderB1 = 3;  // Encoder B pin for motor 1
+volatile long encoderPos1 = 0;  // Position count for motor 1
+
+const int encoderA2 = 4;  // Encoder A pin for motor 2
+const int encoderB2 = 5;  // Encoder B pin for motor 2
+volatile long encoderPos2 = 0;  // Position count for motor 2
+
+// IR Sensor Pin Definitions
+const int IR1 = A0;  // First IR sensor
+const int IR2 = A1;  // Second IR sensor
+const int IR3 = A2;  // Center IR sensor
+const int IR4 = A3;  // Fourth IR sensor
+const int IR5 = A4;  // Fifth IR sensor
+
+// MPU6050 for IMU-based orientation control
+MPU6050 mpu;
+
+char light_sensor[6];  // Store IR sensor states
+char ac_path[100];  // Dry run path
+int ac_path_len = 0;   // Length of the actual path
+char opt_path[100]; // Optimized path
+int opt_path_len = 0;  // Length of the optimized path
+
+void setup() {
+    Wire.begin();
+    mpu.initialize();
+    
+    // Motor setup
+    pinMode(motorPin1, OUTPUT);
+    pinMode(motorPin2, OUTPUT);
+    pinMode(motorPWM1, OUTPUT);
+    
+    pinMode(motorPin3, OUTPUT);
+    pinMode(motorPin4, OUTPUT);
+    pinMode(motorPWM2, OUTPUT);
+
+    // Encoder setup
+    attachInterrupt(digitalPinToInterrupt(encoderA1), doEncoderA1, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(encoderB1), doEncoderB1, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(encoderA2), doEncoderA2, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(encoderB2), doEncoderB2, CHANGE);
+
+    Serial.begin(9600);
+}
+
+void loop() {
+    enum move m = S;     // Initial move
+    enum intersection i;
+    
+    // Dry run: Record path
+    while (m != ST) {
+        detect_sensors(light_sensor);
+        follow_line(light_sensor);
+        i = intersection_handling(light_sensor);
+        m = move_handling(i);
+        record_move(m);  // Record each move to `ac_path[]`
+    }
+
+    // Optimize the path after dry run
+    optimize_path();
+
+    // Actual run: Use optimized path
+    follow_optimized_path();
+}
+
+// Interrupt service routines for encoder feedback
+void doEncoderA1() {
+    encoderPos1++;
+}
+void doEncoderB1() {
+    encoderPos1--;
+}
+void doEncoderA2() {
+    encoderPos2++;
+}
+void doEncoderB2() {
+    encoderPos2--;
+}
+
+// Motor control function
+void move_bot(enum move m) {
+    switch(m) {
+    case R:
+        turn_right();
+        break;
+    case L:
+        turn_left();
+        break;
+    case S:
+        move_straight();
+        break;
+    case U:
+        turn_180();
+        break;
+    case ExI:
+        move_a_bit();
+        break;
+    case ST:
+        stop_motors();
+        break;
+    }
+}
+
+// Functions for turning and moving using encoder feedback
+void turn_right() {
+    long targetPos = encoderPos1 + 100; // Adjust for 90-degree turn
+    while (encoderPos1 < targetPos) {
+        digitalWrite(motorPin1, HIGH);
+        digitalWrite(motorPin2, LOW);
+        digitalWrite(motorPin3, LOW);
+        digitalWrite(motorPin4, HIGH);
+        analogWrite(motorPWM1, 100);
+        analogWrite(motorPWM2, 100);
+    }
+    stop_motors();
+}
+
+void turn_left() {
+    long targetPos = encoderPos1 - 100; // Adjust for 90-degree turn
+    while (encoderPos1 > targetPos) {
+        digitalWrite(motorPin1, LOW);
+        digitalWrite(motorPin2, HIGH);
+        digitalWrite(motorPin3, HIGH);
+        digitalWrite(motorPin4, LOW);
+        analogWrite(motorPWM1, 100);
+        analogWrite(motorPWM2, 100);
+    }
+    stop_motors();
+}
+
+void move_straight() {
+    digitalWrite(motorPin1, HIGH);
+    digitalWrite(motorPin2, LOW);
+    digitalWrite(motorPin3, HIGH);
+    digitalWrite(motorPin4, LOW);
+    analogWrite(motorPWM1, 150);
+    analogWrite(motorPWM2, 150);
+}
+
+void turn_180() {
+    long targetPos = encoderPos1 + 200; // Adjust for 180-degree turn
+    while (encoderPos1 < targetPos) {
+        digitalWrite(motorPin1, HIGH);
+        digitalWrite(motorPin2, LOW);
+        digitalWrite(motorPin3, LOW);
+        digitalWrite(motorPin4, HIGH);
+        analogWrite(motorPWM1, 100);
+        analogWrite(motorPWM2, 100);
+    }
+    stop_motors();
+}
+
+void move_a_bit() {
+    long targetPos = encoderPos1 + 50; // Move forward a small bit
+    while (encoderPos1 < targetPos) {
+        move_straight();
+    }
+    stop_motors();
+}
+
+void stop_motors() {
+    analogWrite(motorPWM1, 0);
+    analogWrite(motorPWM2, 0);
+}
+
+// IR sensor detection
+void detect_sensors(char* light_sensor) {
+    light_sensor[0] = digitalRead(IR1);
+    light_sensor[1] = digitalRead(IR2);
+    light_sensor[2] = digitalRead(IR3);
+    light_sensor[3] = digitalRead(IR4);
+    light_sensor[4] = digitalRead(IR5);
+}
+
+// Follow the line based on IR sensors
+void follow_line(char* light_sensor) {
+    while (strcmp(light_sensor, "00100") != 0) {
+        if (strcmp(light_sensor, "00001") == 0) {
+            turn_right();
+        } else if (strcmp(light_sensor, "00011") == 0) {
+            turn_right();
+        } else if (strcmp(light_sensor, "01100") == 0) {
+            turn_left();
+        } else if (strcmp(light_sensor, "00110") == 0) {
+            move_straight();
+        }
+        detect_sensors(light_sensor); // Update sensor values
+    }
+}
+
+// Intersection handling based on IR sensor values
+enum intersection intersection_handling(char* light_sensor) {
+    while (strcmp(light_sensor, "00100") == 0) {
+        move_bot(S);
+        detect_sensors(light_sensor);
+    }
+
+    if (strcmp(light_sensor, "00000") == 0) {
+        return DE;  // Dead end
+    } else if (strcmp(light_sensor, "00111") == 0) {
+        move_bot(ExI);
+        return RO;  // Right or straight
+    } else if (strcmp(light_sensor, "11100") == 0) {
+        move_bot(ExI);
+        return LO;  // Left or straight
+    } else if (strcmp(light_sensor, "11111") == 0) {
+        move_bot(ExI);
+        return EOM;  // End of maze
+    }
+    return CL;  // Continue line
+}
+
+// Move handling based on intersection type
+enum move move_handling(enum intersection i) {
+    switch (i) {
+    case DE:
+        move_bot(U);
+        break;
+    case EOM:
+        move_bot(ST);
+        break;
+    case S_R:
+        move_bot(S);
+        break;
+    case S_L:
+        move_bot(L);
+        break;
+    case CR:
+        move_bot(L);
+        break;
+    case T:
+        move_bot(L);
+        break;
+    case RO:
+        move_bot(R);
+        break;
+    case LO:
+        move_bot(L);
+        break;
+    case CL:
+        move_bot(S);
+        break;
+    }
+    return S;
+}
+
+// Function to record each move during the dry run
+void record_move(enum move m) {
+    ac_path[ac_path_len++] = m;
+}
+
+// Function that optimizes the recorded path
+void optimize_path() {
+    // Copy actual path to optimized path initially
+    for (int i = 0; i < ac_path_len; i++) {
+        opt_path[i] = ac_path[i];
+    }
+    opt_path_len = ac_path_len;
+
+    // Perform optimization based on original logic
+    while (isoptimizable()) {
+        for (int i = 0; i < opt_path_len; i++) {
+            Serial.print(opt_path[i]);
+            Serial.print(" ");
+        }
+        Serial.println();
+    }
+}
+
+// Function that checks if the path can be optimized
+bool isoptimizable() {
+    int i = 0, j = 0;
+
+    while (i + 1 < opt_path_len) {
+        char temp_path[4];
+        if (opt_path[i] == 'U') {
+            temp_path[0] = opt_path[i - 1];
+            temp_path[1] = opt_path[i];
+            temp_path[2] = opt_path[i + 1];
+            temp_path[3] = '\0';
+
+            // Apply optimization rules
+            if (strcmp(temp_path, "LUR") == 0) {
+                opt_path[j++] = 'U';
+                optimize_moves(i, j);
+                return true;
+            }
+            // Add similar cases for LUS, RUL, etc...
+        }
+        i++;
+    }
+    return false;
+}
+
+// Function that optimizes the moves
+void optimize_moves(int i, int j) {
+    for (int l = j, m = i + 3; m < opt_path_len; l++, m++) {
+        opt_path[l] = opt_path[m];
+    }
+    opt_path_len -= 2;
+}
+
+// Function to follow the optimized path during the actual run
+void follow_optimized_path() {
+    for (int i = 0; i < opt_path_len; i++) {
+        enum move m = (enum move)opt_path[i];
+        move_bot(m);
+        delay(500);  // Adjust delay for smoother transitions
+    }
+}

@@ -1,0 +1,133 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <MPU6050.h>
+
+// Motor Pin Definitions
+const int motorPin1 = 3;  // Motor 1 Forward
+const int motorPin2 = 4;  // Motor 1 Backward
+const int motorPWM1 = 5;  // Motor 1 PWM Speed
+
+const int motorPin3 = 6;  // Motor 2 Forward
+const int motorPin4 = 7;  // Motor 2 Backward
+const int motorPWM2 = 9;  // Motor 2 PWM Speed
+
+// IR Sensor Pin Definitions
+const int IR1 = A0;  // First IR sensor
+const int IR2 = A1;  // Second IR sensor
+const int IR3 = A2;  // Center IR sensor
+const int IR4 = A3;  // Fourth IR sensor
+const int IR5 = A4;  // Fifth IR sensor
+
+// MPU6050 for IMU-based orientation control
+MPU6050 mpu;
+
+// Global variables
+char light_sensor[6];  // Store IR sensor states (null-terminated string)
+
+// Function Prototypes
+void moveForward();
+void turnLeft();
+void turnRight();
+void stopMotors();
+void followLine();
+void turnAround();
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  mpu.initialize();
+  
+  // Motor setup
+  pinMode(motorPin1, OUTPUT);
+  pinMode(motorPin2, OUTPUT);
+  pinMode(motorPWM1, OUTPUT);
+  
+  pinMode(motorPin3, OUTPUT);
+  pinMode(motorPin4, OUTPUT);
+  pinMode(motorPWM2, OUTPUT);
+
+  // IR Sensor setup
+  pinMode(IR1, INPUT);
+  pinMode(IR2, INPUT);
+  pinMode(IR3, INPUT);
+  pinMode(IR4, INPUT);
+  pinMode(IR5, INPUT);
+}
+
+void loop() {
+  // Read sensor values
+  light_sensor[0] = digitalRead(IR1) ? '1' : '0';
+  light_sensor[1] = digitalRead(IR2) ? '1' : '0';
+  light_sensor[2] = digitalRead(IR3) ? '1' : '0';
+  light_sensor[3] = digitalRead(IR4) ? '1' : '0';
+  light_sensor[4] = digitalRead(IR5) ? '1' : '0';
+  light_sensor[5] = '\0'; // Null-terminate the string
+
+  followLine();  // Perform line following logic
+}
+
+void followLine() {
+  if (strcmp(light_sensor, "00100") == 0) {
+    moveForward();
+  } else if (strcmp(light_sensor, "00001") == 0 || strcmp(light_sensor, "00011") == 0) {
+    turnRight();
+  } else if (strcmp(light_sensor, "10000") == 0 || strcmp(light_sensor, "11000") == 0) {
+    turnLeft();
+  } else if (strcmp(light_sensor, "00000") == 0) {
+    // Detect dead-end
+    stopMotors();
+    turnAround();
+  }
+}
+
+void moveForward() {
+  digitalWrite(motorPin1, HIGH);
+  digitalWrite(motorPin2, LOW);
+  digitalWrite(motorPin3, HIGH);
+  digitalWrite(motorPin4, LOW);
+  analogWrite(motorPWM1, 150);
+  analogWrite(motorPWM2, 150);
+}
+
+void turnRight() {
+  digitalWrite(motorPin1, HIGH);
+  digitalWrite(motorPin2, LOW);
+  digitalWrite(motorPin3, LOW);
+  digitalWrite(motorPin4, HIGH);
+  analogWrite(motorPWM1, 100);
+  analogWrite(motorPWM2, 100);
+}
+
+void turnLeft() {
+  digitalWrite(motorPin1, LOW);
+  digitalWrite(motorPin2, HIGH);
+  digitalWrite(motorPin3, HIGH);
+  digitalWrite(motorPin4, LOW);
+  analogWrite(motorPWM1, 100);
+  analogWrite(motorPWM2, 100);
+}
+
+void stopMotors() {
+  analogWrite(motorPWM1, 0);
+  analogWrite(motorPWM2, 0);
+}
+
+void turnAround() {
+  float initial_yaw = 0.0;  // Placeholder value
+  float target_yaw = initial_yaw + 180.0;
+  if (target_yaw >= 360.0) target_yaw -= 360.0;
+
+  digitalWrite(motorPin1, HIGH);
+  digitalWrite(motorPin2, LOW);
+  digitalWrite(motorPin3, LOW);
+  digitalWrite(motorPin4, HIGH);
+  analogWrite(motorPWM1, 100);
+  analogWrite(motorPWM2, 100);
+
+  // Use the MPU to track the rotation, placeholder code below
+  while (abs(0.0 - target_yaw) > 1.0) {  // Replace 0.0 with actual yaw value
+    delay(10);
+  }
+  
+  stopMotors();  // Stop motors after turning
+}

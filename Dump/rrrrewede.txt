@@ -1,0 +1,153 @@
+#include <Wire.h>
+#include <MPU6050.h>
+
+// Motor control pins
+#define motorA1 5  // IN1 for Motor A (D1 on NodeMCU)
+#define motorA2 4  // IN2 for Motor A (D2 on NodeMCU)
+#define motorB1 0  // IN3 for Motor B (D3 on NodeMCU)
+#define motorB2 2  // IN4 for Motor B (D4 on NodeMCU)
+
+// IR sensor pins
+int sensorPins[] = {D1, D2, D3, D4, D5, D6, D7, D8}; // Define your pins here
+int numSensors = 8;
+int sensorValues[8]; 
+
+// PID constants
+float Kp = 1.0, Ki = 0.0, Kd = 0.0;
+float setPoint = 0, error, lastError = 0, integral = 0, derivative = 0;
+float motorSpeedLeft, motorSpeedRight;
+int baseSpeed = 255;  // Max motor speed
+
+MPU6050 mpu;  // Initialize MPU6050
+
+void setup() {
+  Serial.begin(9600);
+
+  // Setup motor control pins
+  pinMode(motorA1, OUTPUT);
+  pinMode(motorA2, OUTPUT);
+  pinMode(motorB1, OUTPUT);
+  pinMode(motorB2, OUTPUT);
+
+  // Setup IR sensors
+  for (int i = 0; i < numSensors; i++) {
+    pinMode(sensorPins[i], INPUT);
+  }
+
+  // Initialize MPU6050
+  Wire.begin();
+  mpu.initialize();
+
+  // Check MPU6050 connection
+  if (!mpu.testConnection()) {
+    Serial.println("MPU6050 connection failed");
+  } else {
+    Serial.println("MPU6050 connection successful");
+  }
+}
+
+void loop() {
+  readSensors();
+  error = calculateError();  // Calculate error based on line position
+
+  // PID calculations
+  integral += error;
+  derivative = error - lastError;
+  float adjustment = (Kp * error) + (Ki * integral) + (Kd * derivative);
+  
+  // Adjust motor speeds based on PID output
+  motorSpeedLeft = baseSpeed - adjustment;
+  motorSpeedRight = baseSpeed + adjustment;
+
+  // Ensure motor speeds are within range
+  motorSpeedLeft = constrain(motorSpeedLeft, 0, 255);
+  motorSpeedRight = constrain(motorSpeedRight, 0, 255);
+
+  // Set motor speeds
+  setMotorSpeed(motorSpeedLeft, motorSpeedRight);
+
+  // Update last error
+  lastError = error;
+
+  // Example A* path finding (simplified version)
+  int path[] = {0, 1, 2, 3};  // Simplified path for demo
+  followPath(path, sizeof(path) / sizeof(path[0]));
+
+  delay(100);
+}
+
+void readSensors() {
+  for (int i = 0; i < numSensors; i++) {
+    sensorValues[i] = digitalRead(sensorPins[i]);
+  }
+}
+
+float calculateError() {
+  int sum = 0;
+  int count = 0;
+
+  for (int i = 0; i < numSensors; i++) {
+    if (sensorValues[i] == 0) {  // Black line detected
+      sum += (i - (numSensors / 2)) * 100;  // Scaled for position
+      count++;
+    }
+  }
+
+  return (count == 0) ? 0 : sum / count;
+}
+
+void setMotorSpeed(float leftSpeed, float rightSpeed) {
+  analogWrite(motorA1, leftSpeed);
+  analogWrite(motorA2, 0);
+  analogWrite(motorB1, rightSpeed);
+  analogWrite(motorB2, 0);
+}
+
+void followPath(int path[], int pathLength) {
+  for (int i = 0; i < pathLength; i++) {
+    switch (path[i]) {
+      case 0:
+        moveForward();
+        break;
+      case 1:
+        moveLeft();
+        break;
+      case 2:
+        moveRight();
+        break;
+      case 3:
+        moveBackward();
+        break;
+    }
+    delay(1000);  // Pause between moves
+  }
+}
+
+// Motor movement functions
+void moveForward() {
+  digitalWrite(motorA1, HIGH);
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, HIGH);
+  digitalWrite(motorB2, LOW);
+}
+
+void moveBackward() {
+  digitalWrite(motorA1, LOW);
+  digitalWrite(motorA2, HIGH);
+  digitalWrite(motorB1, LOW);
+  digitalWrite(motorB2, HIGH);
+}
+
+void moveLeft() {
+  digitalWrite(motorA1, LOW);
+  digitalWrite(motorA2, HIGH);
+  digitalWrite(motorB1, HIGH);
+  digitalWrite(motorB2, LOW);
+}
+
+void moveRight() {
+  digitalWrite(motorA1, HIGH);
+  digitalWrite(motorA2, LOW);
+  digitalWrite(motorB1, LOW);
+  digitalWrite(motorB2, HIGH);
+}
